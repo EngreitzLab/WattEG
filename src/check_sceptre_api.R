@@ -57,7 +57,8 @@ required_slots <- c(
   grna_assignments             = "$grna_group_idxs -> the cre_perts matrix and perturbed-cell counts",
   cells_in_use                 = "maps grna_group_idxs positions onto SCE columns",
   response_precomputations     = "cached $theta -> per-gene negative-binomial dispersion",
-  functs_called                = "asserts assign_grnas() has been run"
+  functs_called                = "asserts assign_grnas() has been run",
+  integer_id                   = "matched against an odm's own @integer_id in attach_response_odm()"
 )
 
 cat("\nInternal sceptre_object slots\n")
@@ -79,6 +80,34 @@ required_functions <- c(
 cat("\nExported functions\n")
 for (fn in required_functions) {
   check(is.function(tryCatch(get(fn, envir = asNamespace("sceptre")), error = function(e) NULL)), fn)
+}
+
+# --- ondisc, for odm-backed response matrices -----------------------------------------
+# ondisc is a sceptre Suggests (Remotes: github::timothy-barry/ondisc), not installed by
+# install_sceptre.R, so it can be entirely absent even when sceptre itself checks out fine.
+# get_response_matrix() (lib/sceptre_io.R) only requires it when the object it is handed is
+# actually odm-backed, but the API surface below is unexported/slot-level in the same sense as
+# the sceptre_object slots above, so it is checked here rather than left to fail at first use.
+cat("\nondisc (only exercised when a sceptre object is odm-backed)\n")
+ondisc_available <- requireNamespace("ondisc", quietly = TRUE)
+check(ondisc_available, "ondisc is installed",
+      "install it (e.g. remotes::install_github(\"timothy-barry/ondisc\")) before running on odm data")
+
+if (ondisc_available) {
+  check(
+    is.function(tryCatch(get("initialize_odm_from_backing_file", envir = asNamespace("ondisc")),
+                         error = function(e) NULL)),
+    "initialize_odm_from_backing_file() is exported",
+    "attach_response_odm() in lib/sceptre_io.R depends on this to reattach an odm after readRDS()"
+  )
+  odm_slots <- methods::slotNames("odm")
+  check("integer_id" %in% odm_slots, "odm class has an @integer_id slot",
+        "attach_response_odm() checks this against the sceptre object's own @integer_id, to catch a mismatched --response-odm before it silently reads the wrong file")
+  check(
+    existsMethod("[", signature(x = "odm", i = "ANY", j = "missing", drop = "missing")),
+    "odm defines a `[` method",
+    "materialize_odm_response_matrix() reads one gene row at a time via m[g, ]"
+  )
 }
 
 # --- the local patches in patches/ ----------------------------------------------------

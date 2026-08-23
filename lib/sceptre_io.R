@@ -19,7 +19,12 @@ suppressPackageStartupMessages(library(Matrix))
 #' @param path path to the .rds
 #' @param require_discovery whether @discovery_result must be populated (needed only to derive
 #'   the p-value threshold)
-read_sceptre_object <- function(path, require_discovery = FALSE) {
+#' @param response_odm_fp path to the response matrix's backing .odm file. Only needed when the
+#'   object's response matrix is odm-backed (out-of-core); ignored otherwise. Required rather than
+#'   read from the odm's own stored path for the same reason sceptre's own
+#'   `read_ondisc_backed_sceptre_object()` requires it: the object may have been created on a
+#'   different machine or moved since, and the stored path is not guaranteed to still resolve.
+read_sceptre_object <- function(path, require_discovery = FALSE, response_odm_fp = NULL) {
   if (!file.exists(path)) {
     stop("Sceptre object not found: ", path, call. = FALSE)
   }
@@ -53,7 +58,39 @@ read_sceptre_object <- function(path, require_discovery = FALSE) {
          "discovery pairs are both keyed by target.", call. = FALSE)
   }
 
+  if (methods::is(so@response_matrix[[1]], "odm")) {
+    so@response_matrix[[1]] <- attach_response_odm(so, response_odm_fp)
+  }
+
   so
+}
+
+#' Reconnect an odm-backed response matrix to its backing file after a readRDS() round trip.
+#'
+#' odm objects hold a C++ external pointer to their backing HDF5 file, and external pointers are
+#' never preserved across serialization -- readRDS() always hands back a dead one, even within the
+#' same R process. Mirrors sceptre's own `read_ondisc_backed_sceptre_object()`: reconnect from a
+#' freshly supplied path, then check `@integer_id` against the sceptre object's own, which is the
+#' same defense sceptre uses against silently pairing an object with the wrong backing file.
+attach_response_odm <- function(so, response_odm_fp) {
+  if (is.null(response_odm_fp)) {
+    stop("This sceptre object's response matrix is odm-backed (out-of-core), which needs the ",
+         "backing .odm file's path to reconnect -- pass --response-odm.", call. = FALSE)
+  }
+  if (!requireNamespace("ondisc", quietly = TRUE)) {
+    stop("This sceptre object's response matrix is odm-backed, which requires the `ondisc` ",
+         "package. It is not installed.", call. = FALSE)
+  }
+  if (!file.exists(response_odm_fp)) {
+    stop("--response-odm file not found: ", response_odm_fp, call. = FALSE)
+  }
+
+  response_odm <- ondisc::initialize_odm_from_backing_file(response_odm_fp)
+  if (!identical(so@integer_id, response_odm@integer_id)) {
+    stop("The sceptre object and --response-odm (", response_odm_fp, ") have distinct IDs; ",
+         "the sceptre object was likely built from a different backing .odm file.", call. = FALSE)
+  }
+  response_odm
 }
 
 #' Cell barcodes, in the column order of the response matrix.
@@ -204,24 +241,104 @@ slim_sceptre_object <- function(so) {
 ## RESPONSE MATRIX ACCESS ==========================================================================
 ##
 ## The only place the pipeline reads actual expression values. Isolated here because it is also
-## the only place that would need to change to support out-of-core (ondisc / `odm`) objects:
+## the only place that needs to change to support out-of-core (ondisc / `odm`) objects:
 ## everything downstream works from the per-gene means and per-cell size factors this produces,
 ## and the simulated matrix handed back to sceptre is always a small in-memory dgRMatrix.
 ##
-## ODM support is deliberately not implemented yet (see docs/development.md). The hard part is
-## that poscounts size factors need, for each cell, the median over genes of count/geomean --
-## a per-column reduction, whereas an odm is row-accessible. It would need either chunked column
-## reads or a two-pass streaming implementation. Erroring explicitly beats silently coercing a
-## 500 GB out-of-core matrix into memory.
+## odm response matrices are materialized into an ordinary in-memory sparse matrix here, once, and
+## nothing downstream (compute_expression_stats(), the CRT simulation) needs to change: the result
+## is bit-identical to what they would compute had the sceptre object carried an in-memory matrix
+## from the start. This works because the pipeline only ever needs *all* genes at once for the
+## poscounts size factors (a per-cell reduction over the whole gene set), and that turns out to be
+## small even at whole-transcriptome scale: ~1.8 GB sparse for 38,606 genes x 147,856 cells,
+## measured on a real DC-TAP-seq object (2.6% density). ODM_MATERIALIZATION_LIMIT_GB exists as a
+## backstop against the genuinely-500-GB case this comment used to warn about, not because the
+## common case is expected to be close to it.
+##
+## odm's `[` only accepts a single row index, never a range -- there is no bulk row-chunk read --
+## so this reads one gene at a time. It is still a one-time, ~2 ms/gene cost (measured), paid once
+## per sample rather than once per simulation replicate.
+##
+## The odm is reconnected to its backing file in read_sceptre_object() (see attach_response_odm()
+## there), not here: by the time get_response_matrix() runs, `so@response_matrix[[1]]` is either
+## an already-connected odm or an ordinary in-memory matrix.
+
+ODM_MATERIALIZATION_LIMIT_GB <- 16
+
+#' Project the in-memory size of fully materializing an odm, from a random sample of rows.
+#'
+#' Sampling rather than reading every row up front, so a dataset that *would* blow the limit is
+#' rejected without first paying the cost of the full read it is about to refuse to do.
+#'
+#' @param limit_gb stop() if the projection exceeds this. Sized far above what any whole-gene,
+#'   whole-cell matrix we have measured needs (~1.8 GB); it exists to catch the case
+#'   materialization was never meant for, not to police ordinary datasets.
+project_and_check_odm_size <- function(m, limit_gb = ODM_MATERIALIZATION_LIMIT_GB, sample_n = 200) {
+  n_gene <- nrow(m)
+  n_cell <- ncol(m)
+  sample_idx <- if (n_gene <= sample_n) seq_len(n_gene) else sort(sample.int(n_gene, sample_n))
+  sampled_nnz <- vapply(sample_idx, function(i) sum(m[i, ] != 0), integer(1))
+
+  # 12 bytes/nonzero: a 4-byte column index plus an 8-byte double, the marginal cost of one
+  # triplet entry in the sparse matrix this is about to become (row/column pointers are
+  # O(n_gene + n_cell) and negligible against O(nnz) for a real single-cell matrix).
+  projected_gb <- mean(sampled_nnz) * n_gene * 12 / 1024^3
+  if (projected_gb > limit_gb) {
+    stop(sprintf(
+      paste("Materializing this odm response matrix is projected to need ~%.1f GiB (%d genes x",
+            "%d cells, sampled density %.4f), over the %.0f GiB limit. This is the case",
+            "out-of-core storage exists for -- the fix here always reads every gene, since the",
+            "poscounts size factors are a per-cell reduction over the whole gene set -- so there",
+            "is no partial-read option. Raise ODM_MATERIALIZATION_LIMIT_GB deliberately if the",
+            "host actually has the memory for it."),
+      projected_gb, n_gene, n_cell, mean(sampled_nnz) / n_cell, limit_gb), call. = FALSE)
+  }
+  invisible(projected_gb)
+}
+
+#' Read every row of a (reconnected) odm into one in-memory sparse matrix.
+#'
+#' One row at a time -- see the "RESPONSE MATRIX ACCESS" note above for why -- assembled via
+#' triplets rather than rbind(), which would copy the growing matrix on every row.
+materialize_odm_response_matrix <- function(m) {
+  n_gene <- nrow(m)
+  n_cell <- ncol(m)
+  gene_ids <- rownames(m)
+  cell_ids <- colnames(m)
+
+  i_parts <- vector("list", n_gene)
+  j_parts <- vector("list", n_gene)
+  x_parts <- vector("list", n_gene)
+  for (g in seq_len(n_gene)) {
+    row <- m[g, ]
+    nz <- which(row != 0)
+    if (length(nz) == 0L) next
+    i_parts[[g]] <- rep.int(g, length(nz))
+    j_parts[[g]] <- nz
+    x_parts[[g]] <- row[nz]
+  }
+
+  Matrix::sparseMatrix(
+    i = unlist(i_parts, use.names = FALSE),
+    j = unlist(j_parts, use.names = FALSE),
+    x = as.double(unlist(x_parts, use.names = FALSE)),
+    dims = c(n_gene, n_cell),
+    dimnames = list(gene_ids, cell_ids),
+    repr = "R"  # dgRMatrix, matching what the non-odm path already hands compute_expression_stats()
+  )
+}
 
 #' Fetch the in-memory response matrix, or fail with a specific message.
+#'
+#' For an odm-backed object (already reconnected by read_sceptre_object()) this checks the
+#' materialized size is sane and returns an ordinary in-memory sparse matrix built from it -- so
+#' callers never need to know whether the object started out-of-core.
 get_response_matrix <- function(so) {
   m <- so@response_matrix[[1]]
 
   if (methods::is(m, "odm")) {
-    stop("This sceptre object is backed by an out-of-core (odm) response matrix, which is not ",
-         "supported yet. Only the expression-statistics step needs it; see ",
-         "docs/development.md for what implementing it involves.", call. = FALSE)
+    project_and_check_odm_size(m)
+    return(materialize_odm_response_matrix(m))
   }
   if (!methods::is(m, "sparseMatrix") && !is.matrix(m)) {
     stop("@response_matrix[[1]] is a ", paste(class(m), collapse = "/"),

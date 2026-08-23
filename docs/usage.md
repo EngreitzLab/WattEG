@@ -57,6 +57,7 @@ Rscript src/prepare_sim_input.R \
 | Option | Default | Meaning |
 |---|---|---|
 | `--sceptre-object` | required | Input sceptre object. The only required input. |
+| `--response-odm` | — | Path to the response matrix's backing `.odm` file. Only needed if `--sceptre-object`'s response matrix is odm-backed (out-of-core); ignored otherwise. |
 | `--outdir` | — | Directory for all outputs; or name each `--out-*` explicitly. |
 | `--out-sim-input` | `<outdir>/sim_input.rds` | Per-gene and per-cell statistics, plus the gRNA and target perturbation matrices. |
 | `--out-sceptre-template` | `<outdir>/sceptre_template.rds` | The sceptre object with `@response_matrix` and `@grna_matrix` emptied. |

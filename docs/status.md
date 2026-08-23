@@ -1399,7 +1399,14 @@ negative claims are essentially never assertable at 100 replicates and a 15 % kn
   fastest (55.8s against 20.5s per replicate). There was no preemption to blame (999 COMPLETED,
   1 FAILED). Set `--target-overhead 8.6` if `N_SPLITS` ever drops far enough that splits hold ten or
   more targets; do not re-split an array for it.
-- **ODM / out-of-core support** is designed for but not implemented. The seam is
-  `get_response_matrix()` in `lib/sceptre_io.R`, which currently errors explicitly on an `odm`.
-  The hard part is that poscounts size factors need a per-cell median over genes — a column-wise
-  reduction — while an `odm` is row-accessible.
+- **ODM / out-of-core support** is implemented. `get_response_matrix()` in `lib/sceptre_io.R`
+  reconnects an odm-backed response matrix (via a new `--response-odm` on `prepare_sim_input.R`,
+  following the same reconnect-plus-`@integer_id`-check pattern as sceptre's own
+  `read_ondisc_backed_sceptre_object()`) and materializes it into an ordinary in-memory sparse
+  matrix, once, before `compute_expression_stats()` ever runs — so nothing downstream changed.
+  This works because the poscounts size factors need a per-cell median over *all* genes (a
+  column-wise reduction the `odm`'s row-only access can't do directly), but reading every row into
+  memory turns out to be small even at whole-transcriptome scale: measured at ~1.8 GB sparse for
+  38,606 genes x 147,856 cells (2.6-2.7% density) on a real DC-TAP-seq object, end to end in under
+  3 minutes. `ODM_MATERIALIZATION_LIMIT_GB` guards the case this used to be written for — a dataset
+  large enough that materializing really would be a mistake.

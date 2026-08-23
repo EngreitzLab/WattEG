@@ -4,7 +4,7 @@
 # src/ reach it the same way. Resolved from testthat's working directory, which is tests/testthat/.
 LIB_DIR <- normalizePath(file.path(testthat::test_path(), "..", "..", "lib"), mustWork = TRUE)
 
-for (f in c("stats.R", "simulate.R", "sim_input.R")) {
+for (f in c("stats.R", "simulate.R", "sim_input.R", "sceptre_io.R")) {
   source(file.path(LIB_DIR, f))
 }
 
