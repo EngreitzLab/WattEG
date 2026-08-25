@@ -43,6 +43,10 @@ sample,sceptre_object
 sample1,results/sample1/sceptre_object.rds
 ```
 
+Add an optional `response_odm` column (see `assets/samplesheet_seqera_test.csv`) for any sample whose
+sceptre object's response matrix is odm-backed — same file `prepare_sim_input.R --response-odm` takes
+standalone. Leave it blank, or omit the column entirely, for in-memory-backed objects.
+
 ## Quickstart
 
 Each step is a standalone executable in `src/` with `--help`.

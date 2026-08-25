@@ -1,0 +1,2 @@
+sample,sceptre_object,response_odm
+wtc11_union_odm,gs://hgrm-seqera/element-gene-power-analysis-test/sceptre_object.rds,gs://hgrm-seqera/element-gene-power-analysis-test/response.odm
