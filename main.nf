@@ -50,6 +50,13 @@ workflow {
               "reps_per_null_chunk (${params.reps_per_null_chunk}), or some replicate will have " +
               "no null model fitted for it."
     }
+    // The gcb profile has no default container_image -- see conf/gcb.config for why -- so a run
+    // that forgets --container_image would otherwise fail 5-30 minutes in, on the first task,
+    // with "pixi: command not found" and no indication the image was ever the problem.
+    if (workflow.profile.tokenize(',').contains('gcb') && !params.container_image) {
+        error "profile 'gcb' requires --container_image (a Wave/Docker image with the pinned " +
+              "pixi environment baked in -- see conf/gcb.config)."
+    }
 
     // ---- inputs ---------------------------------------------------------------------------
     //
