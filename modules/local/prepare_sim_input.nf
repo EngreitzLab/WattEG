@@ -47,7 +47,7 @@ process PREPARE_SIM_INPUT {
 
     stub:
     """
-    touch sim_input.rds sceptre_template.rds pairs.tsv grna_targets.tsv discovery_threshold.txt
+    touch sim_input.rds sceptre_template.rds pairs.tsv grna_targets.tsv discovery_threshold.txt analysis_mode.tsv
     echo '"${task.process}": {}' > versions.yml
     """
 }
