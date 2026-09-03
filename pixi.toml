@@ -43,6 +43,12 @@ r-crayon = "*"        # console messages in check_functions, import_functs, s4_h
 r-parallelly = ">=1.47.0"
 r-withr = "*"
 
+# ondisc is NOT listed here: it is only needed when a --sceptre-object's response matrix is
+# odm-backed (out-of-core), checked for at runtime by attach_response_odm() (lib/sceptre_io.R)
+# and audited by check-api. Like sceptre, it is not on conda-forge/bioconda; install it the same
+# way sceptre is patched in, e.g. remotes::install_github("timothy-barry/ondisc"), only if your
+# input actually needs it.
+
 # No Bioconductor packages are required. The old pipeline used SingleCellExperiment purely
 # as a container -- a per-gene table, a per-cell table, two sparse perturbation matrices,
 # and row/column subsetting. Nothing on the live code path touched rowRanges or any genomic

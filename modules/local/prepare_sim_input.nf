@@ -14,7 +14,7 @@ process PREPARE_SIM_INPUT {
     publishDir "${params.outdir}/${meta.id}/prepared", mode: params.publish_mode
 
     input:
-    tuple val(meta), path(sceptre_object)
+    tuple val(meta), path(sceptre_object), path(response_odm)
 
     output:
     tuple val(meta), path('sim_input.rds'),         emit: sim_input
@@ -25,6 +25,8 @@ process PREPARE_SIM_INPUT {
     path 'versions.yml',                            emit: versions
 
     script:
+    // response_odm is [] (no files staged) for every sample whose response matrix isn't odm-backed.
+    def response_odm_flag = response_odm ? "--response-odm ${response_odm}" : ''
     def control_cells = params.n_control_cells ? "--n-control-cells ${params.n_control_cells}" : ''
     def batches       = params.cell_batches    ? "--cell-batches ${params.cell_batches}"       : ''
     def alpha         = params.alpha           ? "--alpha ${params.alpha}"                     : ''
@@ -33,7 +35,7 @@ process PREPARE_SIM_INPUT {
         Rscript ${projectDir}/src/prepare_sim_input.R \\
             --sceptre-object ${sceptre_object} \\
             --outdir . \\
-            ${control_cells} ${batches} ${alpha}
+            ${response_odm_flag} ${control_cells} ${batches} ${alpha}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

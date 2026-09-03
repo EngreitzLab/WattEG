@@ -50,6 +50,13 @@ workflow {
               "reps_per_null_chunk (${params.reps_per_null_chunk}), or some replicate will have " +
               "no null model fitted for it."
     }
+    // The gcb profile has no default container_image -- see conf/gcb.config for why -- so a run
+    // that forgets --container_image would otherwise fail 5-30 minutes in, on the first task,
+    // with "pixi: command not found" and no indication the image was ever the problem.
+    if (workflow.profile.tokenize(',').contains('gcb') && !params.container_image) {
+        error "profile 'gcb' requires --container_image (a Wave/Docker image with the pinned " +
+              "pixi environment baked in -- see conf/gcb.config)."
+    }
 
     // ---- inputs ---------------------------------------------------------------------------
     //
@@ -60,8 +67,12 @@ workflow {
     // against launchDir and hands back an absolute path, so isAbsolute() is always true and the
     // projectDir fallback would never fire -- the resolution would silently depend on the launch
     // directory, which is the thing this is here to prevent.
+    //
+    // A scheme-prefixed URI (gs://, s3://, az://) is absolute in the same sense a leading '/' is --
+    // it already names a full location, not one relative to the repo. Without this check,
+    // '${projectDir}/gs://bucket/obj' is nonsense and never exists.
     def resolve = { p ->
-        p.toString().startsWith('/') ? file(p) : file("${projectDir}/${p}")
+        p.toString().startsWith('/') || p.toString().matches('(?i)^[a-z][a-z0-9+.-]*://.*') ? file(p) : file("${projectDir}/${p}")
     }
 
     // Emptiness is checked on the file, eagerly, rather than with .ifEmpty on the channel.
@@ -89,7 +100,13 @@ workflow {
             if (!obj.exists()) {
                 error "sample '${row.sample}': sceptre object not found at ${obj}"
             }
-            [ [id: row.sample.trim()], obj ]
+            // Optional: only set when the sceptre object's response matrix is odm-backed. Absent
+            // for every existing samplesheet, which is why the column and the check are optional.
+            def odm = row.response_odm?.trim() ? resolve(row.response_odm.trim()) : []
+            if (odm && !odm.exists()) {
+                error "sample '${row.sample}': --response-odm file not found at ${odm}"
+            }
+            [ [id: row.sample.trim()], obj, odm ]
         }
 
     // ---- step 1: reduce the sceptre object -------------------------------------------------

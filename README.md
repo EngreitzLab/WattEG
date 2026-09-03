@@ -33,12 +33,19 @@ using `grna_integration_strategy = "union"`.
 Everything else is derived from it — the discovery pairs, the gRNA-to-target mapping and the
 significance threshold all already live inside the object.
 
+If the object's response matrix is odm-backed (out-of-core), pass `--response-odm` on
+`prepare_sim_input.R` with the path to the backing `.odm` file — see [Usage](https://engreitzlab.github.io/element-gene-power-analysis/usage/).
+
 List your samples in a CSV (see `assets/samplesheet.csv`):
 
 ```csv
 sample,sceptre_object
 sample1,results/sample1/sceptre_object.rds
 ```
+
+Add an optional `response_odm` column (see `assets/samplesheet_seqera_test.csv`) for any sample whose
+sceptre object's response matrix is odm-backed — same file `prepare_sim_input.R --response-odm` takes
+standalone. Leave it blank, or omit the column entirely, for in-memory-backed objects.
 
 ## Quickstart
 

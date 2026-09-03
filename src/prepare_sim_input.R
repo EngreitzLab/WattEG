@@ -49,6 +49,10 @@ source_lib("sim_input.R", "simulate.R", "sceptre_io.R")
 option_list <- list(
   make_option("--sceptre-object", type = "character", default = NULL, dest = "sceptre_object",
               help = "Input sceptre object (.rds). The only required input."),
+  make_option("--response-odm", type = "character", default = NULL, dest = "response_odm",
+              help = paste("Path to the response matrix's backing .odm file. Only needed if",
+                           "--sceptre-object's response matrix is odm-backed (out-of-core);",
+                           "ignored otherwise. See lib/sceptre_io.R:attach_response_odm().")),
   make_option("--outdir", type = "character", default = NULL, dest = "outdir",
               help = "Directory for all outputs. Overridden by the individual --out-* options."),
   make_option("--out-sim-input", type = "character", default = NULL, dest = "out_sim_input",
@@ -220,7 +224,7 @@ total_started <- proc.time()[["elapsed"]]
 
 log_step("Reading sceptre object: ", opts$sceptre_object)
 started <- proc.time()[["elapsed"]]
-so <- read_sceptre_object(opts$sceptre_object)
+so <- read_sceptre_object(opts$sceptre_object, response_odm_fp = opts$response_odm)
 log_resources("readRDS", started)
 
 cells <- sceptre_cells(so)
