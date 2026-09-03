@@ -58,7 +58,9 @@ required_slots <- c(
   cells_in_use                 = "maps grna_group_idxs positions onto SCE columns",
   response_precomputations     = "cached $theta -> per-gene negative-binomial dispersion",
   functs_called                = "asserts assign_grnas() has been run",
-  integer_id                   = "matched against an odm's own @integer_id in attach_response_odm()"
+  integer_id                   = "matched against an odm's own @integer_id in attach_response_odm()",
+  run_permutations             = "which test the screen ran -- there is no resampling_mechanism slot; set_analysis_parameters() collapses that string to this boolean",
+  low_moi                      = "the other implicit route to permutations: with resampling_mechanism at 'default', low MOI resolves to permutations and high MOI to crt"
 )
 
 cat("\nInternal sceptre_object slots\n")

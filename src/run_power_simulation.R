@@ -134,6 +134,19 @@ validate_sim_input(sim)
 template <- readRDS(opts$sceptre_template)
 log_resources("load inputs", started)
 
+# Which test this screen runs, read off the template rather than assumed. Logged on every task so
+# a simulation output can always be traced to the test that produced it, and used just below to
+# decide whether the gRNA precomputation cache is worth building at all.
+analysis_mode <- sceptre_analysis_mode(template)
+log_step("Resampling mechanism: ", analysis_mode$resampling_mechanism,
+         " (MOI: ", analysis_mode$moi, ")")
+
+use_grna_precomp <- isTRUE(opts$grna_precomp_reuse) && !analysis_mode$run_permutations
+if (isTRUE(opts$grna_precomp_reuse) && analysis_mode$run_permutations) {
+  log_step("Skipping the gRNA precomputation: it is a CRT-path optimisation and this screen ",
+           "uses permutations, which would build the cache once per target and discard it.")
+}
+
 split_pairs <- read_tsv_file(opts$pairs, required_columns = c("grna_target", "response_id"))
 grna_map <- read_tsv_file(opts$grna_targets, required_columns = c("grna_id", "grna_target"))
 
@@ -292,7 +305,14 @@ for (target in targets) {
   # The cache holds regression coefficients, not per-cell fitted probabilities: one target's
   # probabilities would be one double per cell, and the whole point is that this stays negligible
   # next to the count matrix. sceptre reconstructs the probabilities from them bit-identically.
-  grna_precomp <- if (isTRUE(opts$grna_precomp_reuse)) {
+  #
+  # Gated on the CRT path as well as on the flag. The patch injects `grna_precomputations` into
+  # args_to_pass only on the CRT branch -- the permutation branch shares the same do.call and was
+  # deliberately given no ignored formal -- so on a permutations screen this cache is built once
+  # per target and then discarded. Computing it anyway is strictly wasted work, and the only way
+  # to avoid it used to be passing --no-grna-precomp-reuse, which nobody has a reason to suspect
+  # they need. `use_grna_precomp` is resolved once, outside the target loop.
+  grna_precomp <- if (use_grna_precomp) {
     compute_grna_precomputations(target_template, analysis = "discovery_analysis",
                                  grna_targets = target)
   } else {

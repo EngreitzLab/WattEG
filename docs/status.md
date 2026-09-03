@@ -1399,6 +1399,29 @@ negative claims are essentially never assertable at 100 replicates and a 15 % kn
   fastest (55.8s against 20.5s per replicate). There was no preemption to blame (999 COMPLETED,
   1 FAILED). Set `--target-overhead 8.6` if `N_SPLITS` ever drops far enough that splits hold ten or
   more targets; do not re-split an array for it.
+- **Which test a screen ran is now read, not assumed.** `prepare_sim_input.R` reads
+  `@run_permutations` and `@low_moi` off the object, logs them, and writes `analysis_mode.tsv`
+  beside `discovery_threshold.txt`; `run_power_simulation.R` logs the same on every task. This
+  matters because the pipeline re-runs the screen's own test on simulated counts, so the test
+  decides what the power numbers mean — and it is set upstream by `set_analysis_parameters()` and
+  inherited silently. There is no `resampling_mechanism` slot: sceptre collapses that string to the
+  boolean `@run_permutations`.
+
+  **Three routes to permutations, none of them visible at the call site:** an explicit request;
+  `low_moi = TRUE` with `resampling_mechanism` left at `"default"`, which resolves to
+  `permutations` for low MOI and `crt` for high MOI; or an odm-backed response matrix, which
+  `check_set_analysis_parameters()` (sceptre `R/check_functions.R`, check 10) forbids from using
+  CRT at all. Our datasets are `moi = "high"` and in-memory, which is the only reason this pipeline
+  has been on the CRT path without ever choosing it.
+
+  Consequences to carry into the paper: an odm-ingested screen is permutations **end to end**,
+  including the `@discovery_result` the threshold is derived from, so its power is correct for that
+  screen but was produced by a different test from a CRT dataset's — the §6 cross-dataset transfer
+  claim has to say so rather than have a reviewer find it. And the cost model
+  (`1.140s + 0.5561s × pairs`) was fitted on the CRT path *with* the gRNA precomputation patch;
+  neither applies under permutations, where `run_power_simulation.R` now skips building a cache the
+  permutation branch would discard.
+
 - **ODM / out-of-core support** is implemented. `get_response_matrix()` in `lib/sceptre_io.R`
   reconnects an odm-backed response matrix (via a new `--response-odm` on `prepare_sim_input.R`,
   following the same reconnect-plus-`@integer_id`-check pattern as sceptre's own

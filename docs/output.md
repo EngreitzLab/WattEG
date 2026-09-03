@@ -173,6 +173,7 @@ are kept because sceptre requires them on the pair table.
 | `pairs.tsv` | `grna_target`, `response_id` for QC-passing pairs only. |
 | `grna_targets.tsv` | `grna_id`, `grna_target`. |
 | `discovery_threshold.txt` | A single number: the p-value a replicate must beat. |
+| `analysis_mode.tsv` | `resampling_mechanism` (`crt` or `permutations`), `run_permutations`, and `moi`. Which test produced these power numbers. |
 | `split_*.tsv` | Subsets of `pairs.tsv`, balanced by pair count. |
 
 ## Two means, deliberately

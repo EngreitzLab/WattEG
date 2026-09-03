@@ -27,6 +27,7 @@ sceptre_object.rds
       +--> pairs.tsv                  QC-passing discovery pairs
       +--> grna_targets.tsv           gRNA -> target mapping
       +--> discovery_threshold.txt    the p-value a replicate must beat
+      +--> analysis_mode.tsv          which test the screen ran (crt or permutations) and its MOI
       |
       |  split_pairs.R                once per sample
       +--> split_001.tsv ...          balanced chunks of targets
@@ -64,6 +65,7 @@ Rscript src/prepare_sim_input.R \
 | `--out-pairs` | `<outdir>/pairs.tsv` | QC-passing discovery pairs. |
 | `--out-grna-targets` | `<outdir>/grna_targets.tsv` | gRNA → target mapping. |
 | `--out-threshold` | `<outdir>/discovery_threshold.txt` | Largest nominal p-value that survived correction in the real analysis. |
+| `--out-analysis-mode` | `<outdir>/analysis_mode.tsv` | The resampling mechanism (`crt` or `permutations`) and MOI, read off the object. Power is only meaningful against the test the screen actually ran, and that test is set upstream and inherited silently — see below. |
 | `--all-genes` | off | Keep every gene, not just those in QC-passing pairs. Inspection only. |
 | `--no-compress` | off | Write uncompressed `.rds`. Compression is on by default because it measured both smaller *and* faster to read. |
 

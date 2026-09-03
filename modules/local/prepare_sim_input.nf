@@ -22,6 +22,7 @@ process PREPARE_SIM_INPUT {
     tuple val(meta), path('pairs.tsv'),             emit: pairs
     tuple val(meta), path('grna_targets.tsv'),      emit: grna_targets
     tuple val(meta), path('discovery_threshold.txt'), emit: threshold
+    tuple val(meta), path('analysis_mode.tsv'),     emit: analysis_mode
     path 'versions.yml',                            emit: versions
 
     script:

@@ -68,6 +68,10 @@ option_list <- list(
               help = paste("Output path for the nominal p-value threshold derived from",
                            "@discovery_result. Written so compute_power.R does not have to load",
                            "the whole sceptre object just to read one number.")),
+  make_option("--out-analysis-mode", type = "character", default = NULL, dest = "out_analysis_mode",
+              help = paste("Output path for the resampling mechanism and MOI read off the sceptre",
+                           "object. Same reason as --out-threshold: which test produced a set of",
+                           "power numbers should be readable without deserialising the object.")),
   make_option("--all-genes", action = "store_true", default = FALSE, dest = "all_genes",
               help = paste("Keep every gene in the response matrix, not just those in QC-passing",
                            "pairs. Only useful for inspection; the simulation never tests the rest.")),
@@ -98,6 +102,7 @@ out_template <- resolve_output(opts$out_sceptre_template, "sceptre_template.rds"
 out_pairs <- resolve_output(opts$out_pairs, "pairs.tsv")
 out_grna_targets <- resolve_output(opts$out_grna_targets, "grna_targets.tsv")
 out_threshold <- resolve_output(opts$out_threshold, "discovery_threshold.txt")
+out_analysis_mode <- resolve_output(opts$out_analysis_mode, "analysis_mode.tsv")
 
 ## HELPERS =========================================================================================
 
@@ -227,6 +232,22 @@ started <- proc.time()[["elapsed"]]
 so <- read_sceptre_object(opts$sceptre_object, response_odm_fp = opts$response_odm)
 log_resources("readRDS", started)
 
+# Which test this screen was run under, read off the object rather than assumed. The power
+# simulation re-runs this same test, so it decides what the power numbers mean -- and it is set
+# upstream and inherited silently. Logged here, and written to analysis_mode.tsv below, because
+# three different upstream choices land on permutations without ever saying so: an explicit
+# request, low MOI with the default, or an odm-backed response matrix. See
+# sceptre_analysis_mode() in lib/sceptre_io.R.
+analysis_mode <- sceptre_analysis_mode(so)
+log_step("Resampling mechanism: ", analysis_mode$resampling_mechanism,
+         " (MOI: ", analysis_mode$moi, ")")
+if (analysis_mode$run_permutations) {
+  log_step("NOTE: this screen used permutations, not the CRT path every measurement in ",
+           "docs/status.md was made under. Power is still correct for THIS screen -- the ",
+           "simulation re-runs the test the screen actually ran -- but the cost model does not ",
+           "apply and cross-dataset comparisons are comparing across tests.")
+}
+
 cells <- sceptre_cells(so)
 n_cell <- length(cells)
 log_step("Cells: ", n_cell, " (cells_in_use: ", length(so@cells_in_use), ")")
@@ -352,7 +373,7 @@ print(sim)
 log_step("Writing outputs")
 started <- proc.time()[["elapsed"]]
 for (path in unique(dirname(c(out_sim_input, out_template, out_pairs, out_grna_targets,
-                              out_threshold)))) {
+                              out_threshold, out_analysis_mode)))) {
   if (!dir.exists(path)) dir.create(path, recursive = TRUE)
 }
 
@@ -360,6 +381,11 @@ saveRDS(sim, out_sim_input, compress = opts$compress)
 saveRDS(slim_sceptre_object(so), out_template, compress = opts$compress)
 write_tsv_file(pairs, out_pairs)
 write_tsv_file(grna_targets, out_grna_targets)
+
+# Unconditional, unlike the threshold below: an object with no discovery result still has a
+# resampling mechanism, and a missing file would be indistinguishable from an old run that
+# predates this output.
+writeLines(format_analysis_mode(analysis_mode), out_analysis_mode)
 
 # The significance threshold that a simulated replicate has to beat, taken from the real discovery
 # results already inside the object. Written as a plain number so the downstream step does not have

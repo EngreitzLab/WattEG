@@ -188,6 +188,61 @@ discovery_threshold <- function(so) {
   threshold
 }
 
+#' Which statistical test the object was configured for, read rather than assumed.
+#'
+#' The pipeline re-runs the screen's own test on simulated counts, so power is only meaningful
+#' against the test that actually produced the screen's negatives. That test is fixed upstream by
+#' `set_analysis_parameters()` and inherited silently: nothing in this pipeline sets it, and until
+#' this function existed nothing read it either, so two datasets could be analysed under different
+#' tests with nothing in the logs or the outputs saying so.
+#'
+#' There is no `resampling_mechanism` slot. `set_analysis_parameters()` collapses the string to a
+#' boolean (sceptre `R/s4_analysis_functs_1.R`: `run_permutations <- resampling_mechanism ==
+#' "permutations"`, then `sceptre_object@run_permutations <- run_permutations`), so
+#' `@run_permutations` is the thing to read; the string is reconstructed here for the log.
+#'
+#' THREE WAYS A SCREEN ENDS UP ON PERMUTATIONS, none of them visible at the call site:
+#'
+#'   1. The caller asked for it explicitly.
+#'   2. `low_moi = TRUE` with `resampling_mechanism` left at "default" -- the default resolves to
+#'      "permutations" for low MOI and "crt" for high MOI. Our datasets are high MOI, which is the
+#'      only reason this pipeline has been on the CRT path without ever choosing it.
+#'   3. The response matrix was odm-backed when `set_analysis_parameters()` ran:
+#'      `check_set_analysis_parameters()` (sceptre `R/check_functions.R`, check 10) rejects CRT
+#'      outright for an ondisc-backed object.
+#'
+#' Case 3 is why this matters beyond tidiness. An odm-backed screen is permutations end to end --
+#' including the `@discovery_result` the significance threshold is derived from -- so its power
+#' numbers are right for that screen but were produced by a different test from a CRT dataset's.
+#' Comparing power across the two is comparing across tests, which is fine to do and not fine to
+#' do without noticing.
+sceptre_analysis_mode <- function(so) {
+  for (slot_name in c("run_permutations", "low_moi")) {
+    if (!methods::.hasSlot(so, slot_name)) {
+      stop("The sceptre object has no @", slot_name, " slot, so the test it was configured for ",
+           "cannot be determined. That is a sceptre API change -- see src/check_sceptre_api.R.",
+           call. = FALSE)
+    }
+  }
+
+  run_permutations <- isTRUE(so@run_permutations)
+  list(
+    run_permutations     = run_permutations,
+    resampling_mechanism = if (run_permutations) "permutations" else "crt",
+    low_moi              = isTRUE(so@low_moi),
+    moi                  = if (isTRUE(so@low_moi)) "low" else "high"
+  )
+}
+
+#' One `key\tvalue` line per setting, for the log and for the file written beside
+#' discovery_threshold.txt. Same rationale as that file: downstream steps should not have to
+#' deserialise the whole sceptre object to find out which test produced the numbers.
+format_analysis_mode <- function(mode) {
+  c(sprintf("resampling_mechanism\t%s", mode$resampling_mechanism),
+    sprintf("run_permutations\t%s", tolower(as.character(mode$run_permutations))),
+    sprintf("moi\t%s", mode$moi))
+}
+
 #' An empty dgRMatrix with the same shape and dimnames as `original`.
 empty_like <- function(original) {
   new("dgRMatrix",

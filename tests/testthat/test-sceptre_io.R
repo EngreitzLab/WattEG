@@ -113,3 +113,44 @@ test_that("read_sceptre_object reconnects a matching --response-odm end to end",
   expect_false(methods::is(result, "odm"))
   expect_equal(unname(as.matrix(result)), unname(mat))
 })
+
+# sceptre_analysis_mode() reads which test a screen was configured for. There is no
+# resampling_mechanism slot -- set_analysis_parameters() collapses that string to the boolean
+# @run_permutations -- so these pin the mapping in both directions, plus the MOI reporting that
+# explains how a screen reaches permutations without anyone asking for it.
+
+test_that("sceptre_analysis_mode reports crt when run_permutations is FALSE", {
+  skip_if_not_installed("sceptre")
+  so <- methods::new("sceptre_object")
+  so@run_permutations <- FALSE
+  so@low_moi <- FALSE
+
+  mode <- sceptre_analysis_mode(so)
+  expect_false(mode$run_permutations)
+  expect_equal(mode$resampling_mechanism, "crt")
+  expect_equal(mode$moi, "high")
+})
+
+test_that("sceptre_analysis_mode reports permutations when run_permutations is TRUE", {
+  skip_if_not_installed("sceptre")
+  so <- methods::new("sceptre_object")
+  so@run_permutations <- TRUE
+  so@low_moi <- TRUE
+
+  mode <- sceptre_analysis_mode(so)
+  expect_true(mode$run_permutations)
+  expect_equal(mode$resampling_mechanism, "permutations")
+  expect_equal(mode$moi, "low")
+})
+
+test_that("format_analysis_mode emits one key-value line per setting", {
+  skip_if_not_installed("sceptre")
+  so <- methods::new("sceptre_object")
+  so@run_permutations <- TRUE
+  so@low_moi <- TRUE
+
+  lines <- format_analysis_mode(sceptre_analysis_mode(so))
+  expect_equal(lines, c("resampling_mechanism\tpermutations",
+                        "run_permutations\ttrue",
+                        "moi\tlow"))
+})
