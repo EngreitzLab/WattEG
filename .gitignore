@@ -1,5 +1,5 @@
 # pixi environment. pixi.toml and pixi.lock ARE tracked; the solved environment is not.
-.pixi/
+.pixi
 
 # Nextflow
 work/
