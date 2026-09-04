@@ -95,11 +95,16 @@ for reps in "${REPS[@]}"; do
       sub_args=(--subsample-reps "${reps}" --subsample-seed "${seed}")
       [[ "${reps}" -eq 100 ]] && sub_args=()
       echo ">>> power: es=${es} reps=${reps} seed=${seed}"
+      # ${sub_args[@]+...} rather than a bare ${sub_args[@]}. Sherlock runs bash 4.2, where
+      # expanding an EMPTY array under `set -u` is itself an "unbound variable" error -- fixed
+      # upstream in bash 4.4, so this looks correct on any modern machine. It killed the first full
+      # run of this scan after 47 minutes, on the 100-replicate control, which is the one case that
+      # empties the array. The guard makes the expansion vanish when the array is empty.
       pixi_run Rscript src/compute_power.R \
           --simulations "${SWEEP}/sim/es${es}" \
           --threshold-file "${THRESHOLD}" \
           --out "${target}" \
-          "${sub_args[@]}"
+          ${sub_args[@]+"${sub_args[@]}"}
     done
   done
 done
