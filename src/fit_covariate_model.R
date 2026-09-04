@@ -77,6 +77,10 @@ option_list <- list(
               help = "Text report: coefficients, held-out error, per-decile residuals."),
   make_option("--out-residuals", type = "character", default = NULL, dest = "out_residuals",
               help = "Per-pair TSV: covariates, fitted and predicted k, residual, decile."),
+  make_option("--sim-input", type = "character", default = NULL, dest = "sim_input",
+              help = paste("sim_input.rds from prepare_sim_input.R. Supplying it fits the",
+                           "THEORETICAL form as well, which needs the per-gene mean and dispersion",
+                           "the log-linear surrogate leaves out.")),
   make_option("--holdout-frac", type = "double", default = 0.2, dest = "holdout_frac",
               help = "Fraction of pairs held out [default %default]."),
   make_option("--seed", type = "integer", default = 20250812L, dest = "seed",
@@ -214,11 +218,96 @@ rownames(deciles) <- NULL
 width <- deciles$q95 - deciles$q05
 width_ratio <- tapply(width, deciles$covariate, function(w) max(w) / min(w))
 
+## THE THEORETICAL FORM ============================================================================
+#
+# The log-linear model above is a SURROGATE for what the theory actually says. Since
+#
+#   SE^2 ~ (1 / n_pert_cells) * (1 / mu + 1 / theta)     =>     k = sqrt(n / (1/mu + 1/theta))
+#   log k = 0.5 * log(n) - 0.5 * log(1/mu + 1/theta)
+#
+# the slope of log k in log(mu) is 0.5 while 1/mu dominates and falls to ZERO once the dispersion
+# term takes over. A single fitted slope therefore cannot be right everywhere: it is too shallow at
+# low expression and too steep at high, which is exactly the inverted-U bias the decile table shows
+# (k overpredicted at both extremes, underpredicted in the middle).
+#
+# So this fits the theory term directly instead of a free power law in mu. Coefficients are left
+# free rather than fixed at 0.5 and -0.5, because whether they come out at the theoretical values is
+# the test -- fixing them would assume the answer.
+#
+# lib/sim_input.R documents row_data$dispersion as 1/theta (built in lib/simulate.R:120 as
+# 1/theta, and consumed as rnbinom(size = 1/dispersion)), so the theory term 1/mu + 1/theta is
+# `1/mean + dispersion` with no further conversion. Getting that backwards would invert the
+# correction, which is why it is stated here rather than assumed.
+theory_lines <- character(0)
+if (!is.null(opts$sim_input)) {
+  sim <- readRDS(opts$sim_input)
+  rd <- sim$row_data
+  for (column in c("mean", "dispersion")) {
+    if (!column %in% colnames(rd)) {
+      stop("sim_input$row_data has no '", column, "' column.", call. = FALSE)
+    }
+  }
+  gi <- match(df$response_id, rownames(rd))
+  df$gene_mean <- rd$mean[gi]
+  df$gene_disp <- rd$dispersion[gi]
+
+  ok <- is.finite(df$gene_mean) & df$gene_mean > 0 & is.finite(df$gene_disp) & df$gene_disp >= 0
+  log_step("Theory term usable for ", sum(ok), " of ", nrow(df), " pairs")
+  dft <- df[ok, , drop = FALSE]
+  dft$log_theory <- log(1 / dft$gene_mean + dft$gene_disp)
+
+  theory_fit <- stats::lm(log_k ~ log_pert + log_theory, data = dft)
+  tco <- stats::coef(theory_fit)
+  t_r2 <- summary(theory_fit)$r.squared
+  t_sd <- stats::sd(stats::residuals(theory_fit))
+  dft$t_residual <- stats::residuals(theory_fit)
+
+  # The comparison that matters is not R^2 but whether the BIAS by expression decile flattens.
+  # A model can gain R^2 and still be systematically wrong in the tails, which is the failure mode
+  # that makes calibrated intervals dishonest.
+  bias_of <- function(resid, decile) {
+    m <- vapply(split(resid, decile), mean, numeric(1))
+    max(abs(m))
+  }
+  lin_bias <- bias_of(dft$residual, dft$expr_decile)
+  thy_bias <- bias_of(dft$t_residual, dft$expr_decile)
+
+  wid <- function(resid, decile) {
+    parts <- split(resid, decile)
+    w <- vapply(parts, function(v) diff(stats::quantile(v, c(0.05, 0.95), names = FALSE)),
+                numeric(1))
+    max(w) / min(w)
+  }
+
+  theory_lines <- c(
+    "THEORETICAL FORM: log(k) = a + b * log(pert cells) + c * log(1/mu + 1/theta)",
+    sprintf("  pairs: %d", nrow(dft)),
+    sprintf("  a = %+.4f", tco[["(Intercept)"]]),
+    sprintf("  b = %+.4f   (theory: +0.500)", tco[["log_pert"]]),
+    sprintf("  c = %+.4f   (theory: -0.500)", tco[["log_theory"]]),
+    sprintf("  R^2 = %.4f, residual sd = %.4f  ->  k within x%.3f", t_r2, t_sd, exp(t_sd)),
+    "",
+    "  Against the log-linear surrogate, on the SAME pairs:",
+    sprintf("    worst per-decile bias in log k:  log-linear %.4f  ->  theory %.4f  (%.2fx)",
+            lin_bias, thy_bias, lin_bias / thy_bias),
+    sprintf("    interval-width ratio by decile:  log-linear %.2fx  ->  theory %.2fx",
+            wid(dft$residual, dft$expr_decile), wid(dft$t_residual, dft$expr_decile)),
+    "",
+    "  Bias is the number to read, not R^2: a model can fit better on average and still be",
+    "  systematically wrong in the tails, which is what makes a calibrated interval dishonest.",
+    ""
+  )
+
+  df$t_residual <- NA_real_
+  df$t_residual[ok] <- dft$t_residual
+}
+
 ## WRITE ===========================================================================================
 
-write_tsv_file(df[, c("grna_target", "response_id", "k", "pert_cells", "expression",
-                      "log_k", "fitted_log_k", "residual", "expr_decile", "pert_decile")],
-               opts$out_residuals)
+resid_cols <- c("grna_target", "response_id", "k", "pert_cells", "expression",
+                "log_k", "fitted_log_k", "residual", "expr_decile", "pert_decile")
+resid_cols <- c(resid_cols, intersect(c("gene_mean", "gene_disp", "t_residual"), colnames(df)))
+write_tsv_file(df[, resid_cols], opts$out_residuals)
 
 lines <- c(
   "COVARIATE MODEL FOR THE PER-PAIR POWER CURVE",
@@ -252,6 +341,7 @@ lines <- c(
   "  interval a prediction can honestly carry.",
   ""
 )
+lines <- c(lines, theory_lines)
 writeLines(lines, opts$out_summary)
 message(paste(lines, collapse = "\n"))
 log_step("Wrote ", opts$out_summary, " and ", opts$out_residuals)

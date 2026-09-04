@@ -94,6 +94,7 @@ pixi_run Rscript src/fit_covariate_model.R \
     --curves "${SIX_POINT}" \
     --reference "${REFERENCE}" \
     --threshold-file "${THRESHOLD}" \
+    --sim-input "${SWEEP}/prepared/sim_input.rds" \
     --out-summary "${OUT}/covariate_model.txt" \
     --out-residuals "${OUT}/covariate_residuals.tsv"
 
