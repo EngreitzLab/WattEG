@@ -85,15 +85,17 @@ for (fn in required_functions) {
 }
 
 # --- ondisc, for odm-backed response matrices -----------------------------------------
-# ondisc is a sceptre Suggests (Remotes: github::timothy-barry/ondisc), not installed by
-# install_sceptre.R, so it can be entirely absent even when sceptre itself checks out fine.
-# get_response_matrix() (lib/sceptre_io.R) only requires it when the object it is handed is
-# actually odm-backed, but the API surface below is unexported/slot-level in the same sense as
-# the sceptre_object slots above, so it is checked here rather than left to fail at first use.
-cat("\nondisc (only exercised when a sceptre object is odm-backed)\n")
+# ondisc is installed from its own pinned commit by `pixi run setup` (src/install_ondisc.R,
+# ONDISC_SHA in pixi.toml) -- the same treatment as sceptre, and for the same reason: it is not on
+# conda-forge or bioconda, so pixi.lock cannot capture it. It used to be absent by default, which
+# is how the odm tests in tests/testthat/test-sceptre_io.R came to skip silently in CI.
+# get_response_matrix() (lib/sceptre_io.R) only *uses* it when the object it is handed is
+# odm-backed, but the API surface below is unexported/slot-level in the same sense as the
+# sceptre_object slots above, so it is checked here rather than left to fail at first use.
+cat("\nondisc (exercised when a sceptre object is odm-backed)\n")
 ondisc_available <- requireNamespace("ondisc", quietly = TRUE)
 check(ondisc_available, "ondisc is installed",
-      "install it (e.g. remotes::install_github(\"timothy-barry/ondisc\")) before running on odm data")
+      "run `pixi run setup`, which installs it from ONDISC_SHA via src/install_ondisc.R")
 
 if (ondisc_available) {
   check(

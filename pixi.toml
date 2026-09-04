@@ -15,6 +15,12 @@ R_LIBS_USER = "$PIXI_PROJECT_ROOT/.pixi/rlibs"
 # tag). check_sceptre_api.R compares it against packageVersion("sceptre").
 SCEPTRE_REF = "v0.99.0"
 SCEPTRE_SHA = "3ba046b86f33e99dee633fbb8704ee8defdb442d"
+# ondisc, for odm-backed (out-of-core) response matrices. Same story as sceptre: not on
+# conda-forge or bioconda, so it is installed from a pinned commit by `pixi run setup`. ONDISC_REF
+# is the DESCRIPTION version at the pinned commit; ondisc is untagged, so like SCEPTRE_REF it names
+# a version rather than a tag.
+ONDISC_REF = "v1.3.5"
+ONDISC_SHA = "589803edea2a66ad15e7f07186bee16c7739ab8c"
 
 # Runtime dependencies. Kept deliberately small: our own scripts use base R for all file
 # I/O and data manipulation (read.delim/write.table/merge/aggregate) rather than pulling in
@@ -43,13 +49,37 @@ r-crayon = "*"        # console messages in check_functions, import_functs, s4_h
 r-parallelly = ">=1.47.0"
 r-withr = "*"
 
-# ondisc is NOT listed here: it is only needed when a --sceptre-object's response matrix is
-# odm-backed (out-of-core), checked for at runtime by attach_response_odm() (lib/sceptre_io.R)
-# and audited by check-api. Like sceptre, it is not on conda-forge/bioconda; install it the same
-# way sceptre is patched in, e.g. remotes::install_github("timothy-barry/ondisc"), only if your
-# input actually needs it.
+# --- reached by ondisc, for odm-backed (out-of-core) response matrices ------------------
+#
+# ondisc itself is installed from a pinned commit by `pixi run setup` (see ONDISC_SHA above), not
+# listed here -- it is not on conda-forge or bioconda. Its DESCRIPTION Imports are, and R CMD
+# INSTALL enforces all of them, so they have to be present before that install can run.
+#
+# Already covered above: Matrix, Rcpp, dplyr, data.table, crayon. New here:
+"bioconductor-rhdf5lib" = "*"  # ondisc NAMESPACE `import(Rhdf5lib)` -- loaded on every library(ondisc),
+                               # not build-only, so this is a RUNTIME dependency. Also its LinkingTo.
+r-readr = "*"                  # ondisc DESCRIPTION Imports; 2 readr:: references in its sources
 
-# No Bioconductor packages are required. The old pipeline used SingleCellExperiment purely
+# Rhdf5lib ships HDF5 as static archives (libhdf5.a, libhdf5_cpp.a) and ondisc links them into
+# ondisc.so, but static HDF5 still needs its own dependencies resolved -- ondisc's link line ends
+# `-lcrypto -lcurl -lsz -laec -lz -ldl -lm`. Without them the build dies at the very last step with
+# `ld: cannot find -lz`, after every object file has already compiled, which reads like a broken
+# toolchain rather than a missing package.
+#
+# These are runtime dependencies, not build-only: only HDF5 itself is static, so ondisc.so carries
+# DT_NEEDED entries for these and needs them present whenever it loads. They sit here rather than
+# in [feature.build.dependencies] for that reason -- the build environment inherits [dependencies]
+# anyway, so one entry covers both.
+zlib = "*"                     # -lz
+libcurl = "*"                  # -lcurl
+openssl = "*"                  # -lcrypto
+libaec = "*"                   # -lsz and -laec (szip)
+
+# One Bioconductor package is required, and only one: bioconductor-rhdf5lib, above, which arrives
+# with ondisc and nothing else. The rest of this note stands, and is the reason that is worth
+# stating rather than assuming.
+#
+# The old pipeline used SingleCellExperiment purely
 # as a container -- a per-gene table, a per-cell table, two sparse perturbation matrices,
 # and row/column subsetting. Nothing on the live code path touched rowRanges or any genomic
 # range (the only GRanges use was in filt_max_dist_pert(), part of the dead code removed in
@@ -70,8 +100,11 @@ r-withr = "*"
 #   bioconductor-rtracklayer referenced nowhere in the codebase
 #   r-devtools               was only there to install_github(sceptre) at runtime, which
 #                            raced across parallel tasks and wrote into the shared env
-#   r-tidyverse/r-readr/     replaced by base R in our scripts
-#   r-tibble
+#   r-tidyverse/r-tibble     replaced by base R in our scripts
+#
+# r-readr was in that list until ondisc arrived: our own scripts still use base R for all file
+# I/O, but ondisc's DESCRIPTION Imports it and R CMD INSTALL enforces that field. It is here for
+# ondisc's benefit, not ours -- the same reason most of the runtime list exists for sceptre's.
 
 # Building sceptre from source needs a compiler toolchain, remotes, and -- as verified by
 # a failed install -- every package in sceptre's DESCRIPTION Imports, because R CMD INSTALL
@@ -109,7 +142,7 @@ lint = { cmd = "./.githooks/pre-commit --all", description = "Run the pre-commit
 # Scoped to the environments that carry the extra dependencies, so `pixi run setup`
 # resolves to the build environment without the caller having to name it.
 [feature.build.tasks]
-setup = { cmd = "Rscript src/install_sceptre.R", description = "Install sceptre from the pinned commit into .pixi/rlibs" }
+setup = { cmd = "Rscript src/install_sceptre.R && Rscript src/install_ondisc.R", description = "Install sceptre (patched) and ondisc from their pinned commits into .pixi/rlibs" }
 
 [feature.dev.tasks]
 test = { cmd = "Rscript -e 'testthat::test_dir(\"tests/testthat\")'", description = "Run unit tests" }
