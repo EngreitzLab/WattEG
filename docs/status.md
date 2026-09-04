@@ -964,12 +964,30 @@ dataset's.
 
   | Dataset | Effect sizes with power output |
   |---|---|
-  | `dc_tap_paper_wtc11_no_shuf` | **0.05 / 0.1 / 0.15 / 0.2 / 0.25 / 0.5** |
+  | `dc_tap_paper_wtc11_no_shuf` | **0.05 / 0.1 / 0.15 / 0.2 / 0.25 / 0.5** (6,574 pairs) |
+  | **`day0`** (Oak, 2026-09-03) | **0.05 / 0.1 / 0.15 / 0.2 / 0.25 / 0.5** (34,886 pairs) |
   | `day0_grna20` | 0.1 / 0.15 / 0.2 |
   | `dc_tap_paper_k562` / `dc_tap_paper_wtc11` | 0.05 / 0.1 (and both carry the size-factor shuffle) |
   | `day0_grna20_no_shuffle`, `dc_tap_paper_k562_no_shuf`, `day2`, `day4` | 0.15 only |
 
-  So the held-out test cannot be repeated on a second dataset without new compute. **Sweeps are needed
+  **This changed on 2026-09-03: `day0` now has a second full six-point sweep**, run under `null_fit`
+  through the Nextflow runner and published to
+  `oak/projects/element-gene-power-analysis/power_sweep/day0/`. So the held-out test *can* now be
+  repeated on a second dataset with no new compute. day2 and day4 were started alongside it and
+  stopped part-way (2,221 and 3,102 of 6,000 tasks); their work directories on `$SCRATCH` are intact
+  and both are resumable.
+
+  The two datasets are complementary rather than redundant, which is the useful part: `wtc11` is
+  well powered and transitions between 5 % and 15 %, `day0` is not and 84 % of its pairs transition
+  between 5 % and 25 %. A reduced design that holds on both holds across the range that matters; one
+  that holds only on `wtc11` is a much weaker result, and better to discover before committing
+  Gasperini compute.
+
+  **One caveat carries into any cross-dataset comparison.** The `wtc11` sweep was produced by the
+  pre-refactor pipeline and carries the inherited-null-model bias (power understated by ~0.03,
+  one-directionally); `day0` was run under `null_fit` and does not. Within a dataset the bias
+  cancels, so steps 2-3 of `paper/experiments.md` are unaffected. Across datasets it does not, and
+  that is the open `[DECISION]` in step 1 of that file. **Sweeps are needed
   on at least two more datasets**, and the two worth doing are `dc_tap_paper_k562_no_shuf` — same
   protocol as `wtc11`, different cell type, so it isolates cell type from method — and **Gasperini et
   al.**, which is a different lab, protocol and scale entirely and is therefore the real test of
@@ -1281,10 +1299,29 @@ the yardstick for judging the old-vs-new difference.
 
 ### Comparison 2 — monotonicity at full replicate count
 
-Power must not decrease as effect size increases. At 12 replicates on 33 pairs this held (mean power
-0.356 → 0.604 → 0.838 for 0.15 / 0.25 / 0.5) with one violation of 0.08 that a two-proportion test
-could not distinguish from noise. Worth repeating at 100 replicates across all 32,386 pairs, where
-noise-driven violations should nearly vanish. A violation that survives is a bug.
+**DONE, PASSED** on `day0`, 2026-09-03. Power must not decrease as effect size increases, and a
+violation that survives at full replicate count is a bug.
+
+| | |
+|---|---:|
+| Pairs | 34,886 |
+| Consecutive comparisons (5 per pair) | 174,430 |
+| Decreases | **2,300 (1.32 %)** |
+| Largest decrease | **0.070** |
+| Pairs with `n_reps` ≠ 100 | **0** |
+
+Nothing survives as a bug. At 100 replicates the standard error of a power estimate near 0.5 is
+0.05, so a *difference* of two estimates carries an SE around 0.07 — and the largest decrease
+observed is exactly 0.070, one standard error. Every violation is inside Monte-Carlo noise.
+
+The rate is about double `wtc11`'s (0.67 %, 220 of 32,870), which is expected rather than
+concerning: `day0` is the less-powered dataset, so more of its pairs sit in the steep part of the
+curve where adjacent effect sizes are close together and noise can invert them. Worth stating in
+the paper rather than leaving for a reviewer to ask about.
+
+The earlier evidence, kept because it is what motivated running this: at 12 replicates on 33 pairs
+it held (mean power 0.356 → 0.604 → 0.838 for 0.15 / 0.25 / 0.5) with one violation of 0.08 that a
+two-proportion test could not distinguish from noise.
 
 ### Comparison 3 — timing and memory at scale
 

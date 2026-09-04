@@ -15,7 +15,25 @@ That leaves Gasperini as the only step needing real compute, and its cost is ups
 
 ## Step 1 — a full sweep as ground truth
 
-**Status: already exists** for `wtc11`. 6 effect sizes × 100 replicates × 6,574 pairs, per replicate.
+**Status: exists for two datasets now.**
+
+| | `wtc11` | `day0` |
+|---|---:|---:|
+| Pairs | 6,574 | **34,886** |
+| Effect sizes × replicates | 6 × 100 | 6 × 100 |
+| Null model | inherited cache (pre-refactor) | **`null_fit`** |
+| Powered | well; transitions 5–15 % | poorly; 84 % transition 5–25 % |
+| Monotonicity violations | 0.67 % | 1.32 %, largest 0.070 (≈ 1 SE) |
+
+`day0` was swept on 2026-09-03 and lives at
+`oak/projects/element-gene-power-analysis/power_sweep/day0/`. Its `power_summary.tsv` already *is*
+the ground-truth object this step asks for: per-pair power at all six effect sizes with Wilson
+intervals, `min_detectable_effect_size` with its `_ci_low`/`_ci_high` bracket, and the covariates
+§6 needs. Nothing to build.
+
+The two are complementary rather than duplicative — one well powered, one not — so a reduced design
+that holds on both holds across the range that matters. day2 and day4 were started alongside and
+stopped part-way; both are resumable and would take the count to four.
 
 Nothing to run. What *is* needed is a defined ground-truth object: per-pair power at each of the six
 effect sizes, with Wilson intervals, plus the minimum detectable effect size derived from
