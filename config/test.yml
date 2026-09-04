@@ -33,7 +33,15 @@ seed: 20250812
 
 # Split as production does, then simulate only the first few, so the split geometry is identical to
 # a real run rather than a special case.
-n_splits: 1000
+# Must not exceed the object's target count: whole targets stay together, so split_pairs.R cannot
+# write more splits than there are targets, and SPLIT_PAIRS asserts it wrote exactly n_splits. The
+# synthetic object has 12 targets, so 1000 here failed that assertion -- it only ever worked
+# because this profile used to point at a 3,026-target lab object. 4 matches what
+# 13_make_test_data.sbatch computes for the same object.
+#
+# Note test_max_splits below does NOT help: it trims the channel AFTER splitting, so all n_splits
+# files are still written.
+n_splits: 4
 test_max_splits: 3
 
 reps_per_chunk: 2

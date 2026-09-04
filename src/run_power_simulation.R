@@ -423,7 +423,13 @@ if (length(dropped) > 0) {
   log_step("Dropping ", length(dropped), " column(s) nothing downstream reads: ",
            paste(dropped, collapse = ", "))
 }
-combined <- combined[, present, drop = FALSE]
+
+# as.data.frame() FIRST. sceptre's get_result() returns a data.table, and `dt[, present]` does not
+# mean "select the columns named in `present`" there -- data.table evaluates the expression in the
+# frame's own scope, so it looks for a column literally called "present" and errors. Coercing makes
+# the base-R idiom mean what it says, and nothing downstream needs a data.table: write.table takes
+# either.
+combined <- as.data.frame(combined)[, present, drop = FALSE]
 
 write_tsv_file(combined, opts$out)
 log_step("Wrote ", nrow(combined), " rows to ", opts$out)

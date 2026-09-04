@@ -114,10 +114,19 @@ dir <- dirname(opts$out)
 if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
 
 started <- proc.time()[["elapsed"]]
-nanoparquet::write_parquet(
-  combined, opts$out,
-  options = nanoparquet::parquet_options(compression = opts$compression)
-)
+
+# `compression` belongs to write_parquet(), NOT to parquet_options().
+#
+# Passing it to parquet_options() does not error the way a wrong argument name usually would:
+# parquet_options() has no `...` but does have `compression_level`, so R's PARTIAL ARGUMENT MATCHING
+# silently binds `compression = "zstd"` to `compression_level`, and the failure surfaces as
+# "compression_level must be an integer scalar" -- a message about an argument the caller never
+# named. Keep this as a direct argument.
+codecs <- c("snappy", "gzip", "zstd", "uncompressed")
+if (!opts$compression %in% codecs) {
+  stop("--compression must be one of: ", paste(codecs, collapse = ", "), call. = FALSE)
+}
+nanoparquet::write_parquet(combined, opts$out, compression = opts$compression)
 log_resources("write parquet", started)
 
 in_bytes <- sum(file.size(paths), na.rm = TRUE)
