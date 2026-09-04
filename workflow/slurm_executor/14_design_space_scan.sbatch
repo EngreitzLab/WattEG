@@ -40,16 +40,21 @@
 # expected to beat wtc11's best grid here. That expectation is exactly what this measures.
 #
 # Usage:  sbatch workflow/slurm_executor/14_design_space_scan.sbatch
-#         SAMPLE=day2 sbatch workflow/slurm_executor/14_design_space_scan.sbatch
+#         SCAN_SAMPLE=day2 sbatch workflow/slurm_executor/14_design_space_scan.sbatch
 
 set -euo pipefail
 
 _cmd="$(scontrol show job "${SLURM_JOB_ID:-0}" 2>/dev/null | sed -n 's/.*Command=\([^[:space:]]*\).*/\1/p' | head -1)"
 source "$(cd "$(dirname "${_cmd:-$0}")" && pwd)/config.sh"
 
-SAMPLE="${SAMPLE:-day0}"
-SWEEP="${SWEEP:-/home/users/emattei/oak/projects/element-gene-power-analysis/power_sweep/${SAMPLE}/${SAMPLE}}"
-OUT="${OUT:-${SWEEP}/reduced_design}"
+# SCAN_SAMPLE, not SAMPLE. config.sh above already exports SAMPLE (=day0_grna20_no_shuffle, the
+# sbatch runner's own dataset), so `${SAMPLE:-day0}` silently inherits that instead of defaulting --
+# the first run of this script scanned a sweep that does not exist and died on a missing threshold
+# file. Same trap as the `scratch` shadowing in conf/sherlock.config: a local name colliding with an
+# inherited one, reported as something else entirely. Do not rename these back.
+SCAN_SAMPLE="${SCAN_SAMPLE:-day0}"
+SWEEP="${SCAN_SWEEP:-/home/users/emattei/oak/projects/element-gene-power-analysis/power_sweep/${SCAN_SAMPLE}/${SCAN_SAMPLE}}"
+OUT="${SCAN_OUT:-${SWEEP}/reduced_design}"
 
 # All six, so any three or four of them can be selected as a fit grid and the rest held out.
 ALL_ES=(0.05 0.1 0.15 0.2 0.25 0.5)
@@ -62,7 +67,7 @@ REPS=(${REPS_LIST:-10 20 30 50 100})
 # the point -- it is what says whether a design is reliably good or got lucky.
 SEEDS=(${SEEDS_LIST:-1 2 3})
 
-log_header "Step 14: reduced-design scan for ${SAMPLE}"
+log_header "Step 14: reduced-design scan for ${SCAN_SAMPLE}"
 load_pixi
 
 mkdir -p "${OUT}/power" "${OUT}/curves"
