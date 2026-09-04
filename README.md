@@ -1,9 +1,14 @@
-# element-gene-power-analysis
+# WattEG
 
-Power analysis for element–gene pairs in single-cell CRISPR screens, built on
-[sceptre](https://katsevich-lab.github.io/sceptre/).
+**W**atts for **E**lement–**G**ene pairs: power analysis for element–gene pairs in single-cell
+CRISPR screens, built on [sceptre](https://katsevich-lab.github.io/sceptre/).
 
-**📖 [Documentation](https://engreitzlab.github.io/element-gene-power-analysis/)**
+**📖 [Documentation](https://engreitzlab.github.io/WattEG/)**
+
+This repository is the **tool**: the pipeline, how to run it, and what it produces. The analyses and
+figures for the methods paper live separately, in
+[broadinstitute/WattEG-paper](https://github.com/broadinstitute/WattEG-paper) — split out on
+2026-09-04 so the two can move at their own pace.
 
 Given a sceptre object from a completed screen, it answers: for each element–gene pair, if the
 element really did reduce expression of the gene by X%, how often would we have detected it? The
@@ -34,7 +39,7 @@ Everything else is derived from it — the discovery pairs, the gRNA-to-target m
 significance threshold all already live inside the object.
 
 If the object's response matrix is odm-backed (out-of-core), pass `--response-odm` on
-`prepare_sim_input.R` with the path to the backing `.odm` file — see [Usage](https://engreitzlab.github.io/element-gene-power-analysis/usage/).
+`prepare_sim_input.R` with the path to the backing `.odm` file — see [Usage](https://engreitzlab.github.io/WattEG/usage/).
 
 List your samples in a CSV (see `assets/samplesheet.csv`):
 
@@ -96,19 +101,19 @@ Parameters live in `config/config.yml`.
 Always read a power estimate together with its interval: `power = 0` at 100 replicates has a 95%
 upper bound of 0.037, so it means "not detected in 100 tries", not "undetectable".
 
-See [Output](https://engreitzlab.github.io/element-gene-power-analysis/output/) for every column.
+See [Output](https://engreitzlab.github.io/WattEG/output/) for every column.
 
 ## Choosing parameters
 
 `num_replicates` is the only parameter that changes results; `n_splits` and `reps_per_chunk` only
 change how the work is divided. How many replicates you need depends on what you do with the
 numbers — read
-[Choosing num_replicates](https://engreitzlab.github.io/element-gene-power-analysis/choosing-num-replicates/).
+[Choosing num_replicates](https://engreitzlab.github.io/WattEG/choosing-num-replicates/).
 
 Leave `n_control_cells` unset. Sampling control cells looks like a large speedup but costs 21–60% of
 your power, because sceptre's conditional randomisation test needs enough cells to resolve the null
 tail at the significance threshold. Measured numbers are in
-[Methods](https://engreitzlab.github.io/element-gene-power-analysis/methods/).
+[Methods](https://engreitzlab.github.io/WattEG/methods/).
 
 ## Status
 
@@ -125,17 +130,17 @@ re-run it.
 Layout: `src/` holds the pipeline executables, `lib/` the shared code they source, and `workflow/`
 the cluster scripts and comparison tools.
 
-**[Status and handoff](https://engreitzlab.github.io/element-gene-power-analysis/status/)** has the
+**[Status and handoff](https://engreitzlab.github.io/WattEG/status/)** has the
 full picture: what is done and verified, what is left, reference numbers for sizing a cluster run,
 ready-to-use SLURM array scripts, and how to run the old-vs-new comparison.
 
 ## Documentation
 
-- [Usage](https://engreitzlab.github.io/element-gene-power-analysis/usage/) — every parameter, and running each step by hand
-- [Output](https://engreitzlab.github.io/element-gene-power-analysis/output/) — every output column
-- [Choosing num_replicates](https://engreitzlab.github.io/element-gene-power-analysis/choosing-num-replicates/) — precision, cost, confidence intervals
-- [Methods](https://engreitzlab.github.io/element-gene-power-analysis/methods/) — how the simulation is parameterised
-- [Development](https://engreitzlab.github.io/element-gene-power-analysis/development/) — environment, sceptre pinning, conventions
+- [Usage](https://engreitzlab.github.io/WattEG/usage/) — every parameter, and running each step by hand
+- [Output](https://engreitzlab.github.io/WattEG/output/) — every output column
+- [Choosing num_replicates](https://engreitzlab.github.io/WattEG/choosing-num-replicates/) — precision, cost, confidence intervals
+- [Methods](https://engreitzlab.github.io/WattEG/methods/) — how the simulation is parameterised
+- [Development](https://engreitzlab.github.io/WattEG/development/) — environment, sceptre pinning, conventions
 
 ## License
 

@@ -1,5 +1,5 @@
 [workspace]
-name = "element-gene-power-analysis"
+name = "watteg"
 description = "SCEPTRE-based power analysis for element-gene pairs in single-cell CRISPR screens"
 channels = ["conda-forge", "bioconda"]
 platforms = ["linux-64", "osx-arm64"]

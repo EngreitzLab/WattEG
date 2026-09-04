@@ -1,5 +1,5 @@
 # Parameters for the element-gene power analysis.
-# Full descriptions: https://engreitzlab.github.io/element-gene-power-analysis/
+# Full descriptions: https://engreitzlab.github.io/WattEG/
 #
 # This file is read directly by Nextflow (`-params-file config/config.yml`) and mirrored by hand in
 # workflow/slurm_executor/config.sh, which cannot parse YAML in bash without more fragility than it

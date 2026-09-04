@@ -10,7 +10,7 @@ attributable to the step rather than to the runner. Nextflow (Step 7 in
 ## Run order
 
 ```sh
-cd /home/groups/engreitz/Users/emattei/git/element-gene-power-analysis
+cd /home/groups/engreitz/Users/emattei/git/WattEG
 
 sbatch workflow/slurm_executor/00_setup_env.sbatch            # prerequisite, not a pipeline step
 sbatch workflow/slurm_executor/01_prepare_sim_input.sbatch

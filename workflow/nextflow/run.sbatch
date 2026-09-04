@@ -48,7 +48,7 @@ ml biology nextflow/25.04.7
 # repo. $HOME is 15 GB and NFS-backed, and a 1,000-task run with a 448 MB input object staged per
 # task would fill it. $SCRATCH is 100 TB.
 export NXF_HOME="${GROUP_HOME}/software/nextflow_home"
-export NXF_WORK="${SCRATCH}/nextflow_work/element-gene-power-analysis"
+export NXF_WORK="${SCRATCH}/nextflow_work/watteg"
 export NXF_TEMP="${SCRATCH}/nextflow_tmp"
 export NXF_OPTS='-Xms1g -Xmx4g'
 

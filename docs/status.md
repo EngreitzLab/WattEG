@@ -902,299 +902,26 @@ dependency change rather than during one.
 
 ### Step 11 — fit the power curve and run three effect sizes instead of six
 
-Prototyped in `src/fit_power_curve.R`, validated on one dataset, not yet adopted. Halves the cost of
-a sweep (~2,575 CPU-hours at 100 replicates on this dataset) and makes the minimum detectable effect
-size continuous rather than snapped to whichever effect sizes were run.
+`src/fit_power_curve.R` fits each pair's power curve so a sweep needs three effect sizes rather
+than six, and makes the minimum detectable effect size continuous rather than snapped to whichever
+effect sizes were run. Usage is in [Usage]({{ site.baseurl }}{% link usage.md %}); the model is
+derived in [Methods]({{ site.baseurl }}{% link methods.md %}).
 
-**The model is derived, not curve-fitted.** For a Wald-type test at a fixed threshold,
-
-```
-power(effect_size) = Phi(beta / SE - z),   beta = -log(1 - effect_size),  z = qnorm(1 - alpha)
-```
-
-`beta` is the effect on the scale the test works on, `SE` collects everything pair-specific
-(perturbed cells, expression, dispersion), and `z` is fixed by the discovery threshold and shared by
-every pair. On the probit scale that is a straight line through `-z` with slope `1/SE`: **one free
-parameter per pair**, so three effect sizes leave two degrees of freedom to *check* the fit rather
-than just enough to force it. `src/fit_power_curve.R` fits it as a binomial GLM with a probit link,
-no intercept and `-z` as an offset — a GLM rather than least squares on `qnorm(power)` because 0/100
-and 100/100 still carry information about the slope, whereas `qnorm()` would be infinite there.
-
-**Validation.** Held-out test on `dc_tap_paper_wtc11_no_shuf`, which has a complete six-point sweep
-(0.05 / 0.1 / 0.15 / 0.2 / 0.25 / 0.5) over 6,574 pairs at 100 replicates. Fit on three of them,
-predict the other three, compare against what was measured:
-
-| Fit grid | pairs fitted | MAE (held out) | p90 error | noise floor | MDES exact | MDES ±1 step |
-|---|---:|---:|---:|---:|---:|---:|
-| 0.05 / 0.25 / 0.5 | 6,547 | 0.0488 | 0.126 | 0.0201 | 82.6 % | 98.0 % |
-| 0.05 / 0.1 / 0.15 | 6,405 | 0.0270 | 0.083 | 0.0067 | 82.7 % | 96.1 % |
-| 0.05 / 0.15 / 0.5 | 6,548 | 0.0338 | 0.104 | 0.0167 | 85.2 % | 98.3 % |
-| **0.05 / 0.1 / 0.25** | 6,477 | **0.0167** | **0.056** | 0.0104 | **89.0 %** | **99.2 %** |
-
-"Noise floor" is the mean binomial standard error of the measured value being compared against, so
-the best grid predicts held-out power to within about 1.6× the noise of simply measuring it, and
-reproduces the six-point sweep's minimum detectable effect size exactly for 89 % of pairs.
-
-Two supporting checks on the same data. The functional form holds: fitting per pair on all six
-points gives a probit-scale residual sd of 0.132 (median), against ~0.13 expected from
-100-replicate binomial noise alone at power 0.5 — the straight line fits as well as the data can
-distinguish. And **monotonicity holds**: of 32,870 consecutive-effect-size comparisons only 220
-(0.67 %) decrease, largest decrease 0.060, which is about one standard error of a difference.
-
-**Grid placement is dataset-specific and matters more than the number of points.** `wtc11` is well
-powered and transitions between 5 % and 15 %; `day0_grna20_no_shuffle` is not, and 84 % of its pairs
-transition between 5 % and 25 %. Projecting each `day0` pair's curve from its measured 0.15 power:
-
-| Grid | `day0` pairs with ≥1 point where power is 0.1–0.9 |
-|---|---:|
-| 5 / 25 / 50 | 26.3 % |
-| 5 / 15 / 50 | 60.4 % |
-| **10 / 20 / 35** | **100.0 %** |
-| 5 / 15 / 25 / 50 | 72.3 % |
-
-A one-parameter sigmoid is only well determined by points away from 0 and 1, so a grid that brackets
-the transition rather than sampling it wastes replicates. Pick the grid from a cheap pilot — one
-effect size at 30 replicates locates the transition distribution — rather than reusing another
-dataset's.
-
-**Open points before adopting it.**
-
-- **Validated on one dataset, and this is now the critical gap.** `dc_tap_paper_wtc11_no_shuf` is the
-  *only* dataset with a full six-point sweep. Inventory of what exists today:
-
-  | Dataset | Effect sizes with power output |
-  |---|---|
-  | `dc_tap_paper_wtc11_no_shuf` | **0.05 / 0.1 / 0.15 / 0.2 / 0.25 / 0.5** (6,574 pairs) |
-  | **`day0`** (Oak, 2026-09-03) | **0.05 / 0.1 / 0.15 / 0.2 / 0.25 / 0.5** (34,886 pairs) |
-  | `day0_grna20` | 0.1 / 0.15 / 0.2 |
-  | `dc_tap_paper_k562` / `dc_tap_paper_wtc11` | 0.05 / 0.1 (and both carry the size-factor shuffle) |
-  | `day0_grna20_no_shuffle`, `dc_tap_paper_k562_no_shuf`, `day2`, `day4` | 0.15 only |
-
-  **This changed on 2026-09-03: `day0` now has a second full six-point sweep**, run under `null_fit`
-  through the Nextflow runner and published to
-  `oak/projects/element-gene-power-analysis/power_sweep/day0/`. So the held-out test *can* now be
-  repeated on a second dataset with no new compute. day2 and day4 were started alongside it and
-  stopped part-way (2,221 and 3,102 of 6,000 tasks); their work directories on `$SCRATCH` are intact
-  and both are resumable.
-
-  The two datasets are complementary rather than redundant, which is the useful part: `wtc11` is
-  well powered and transitions between 5 % and 15 %, `day0` is not and 84 % of its pairs transition
-  between 5 % and 25 %. A reduced design that holds on both holds across the range that matters; one
-  that holds only on `wtc11` is a much weaker result, and better to discover before committing
-  Gasperini compute.
-
-  **One caveat carries into any cross-dataset comparison.** The `wtc11` sweep was produced by the
-  pre-refactor pipeline and carries the inherited-null-model bias (power understated by ~0.03,
-  one-directionally); `day0` was run under `null_fit` and does not. Within a dataset the bias
-  cancels, so steps 2-3 of `paper/experiments.md` are unaffected. Across datasets it does not, and
-  that is the open `[DECISION]` in step 1 of that file. **Sweeps are needed
-  on at least two more datasets**, and the two worth doing are `dc_tap_paper_k562_no_shuf` — same
-  protocol as `wtc11`, different cell type, so it isolates cell type from method — and **Gasperini et
-  al.**, which is a different lab, protocol and scale entirely and is therefore the real test of
-  generalization. The DC-TAP data is Ray et al.; `wtc11` and `k562` are two of its cell types, so
-  validating only within it is close to validating within one experiment.
-
-  Note the shuffled variants are not usable as references for absolute power, since the size-factor
-  permutation paired each cell's library size with another cell's perturbation status. They may still
-  be usable for checking the *functional form* of the curve, which is a claim about shape rather than
-  level — worth deciding deliberately rather than by accident.
-- **`z` should come from the threshold, but did not match.** Fitting `z` per pair on `wtc11` gives a
-  median of 2.045, and the script's `--threshold-file` route would use `qnorm(1 - threshold)`. Where
-  those disagree, `--fit-z` profiles a single shared `z` by total deviance. Worth understanding why
-  they differ — sceptre's test is a conditional-resampling test with a skew-normal approximation,
-  not a Wald test, so some deviation is expected.
-- **Keep the raw per-effect-size power values.** The fitted curve is monotone by construction, so
-  the monotonicity check above is only meaningful on unfitted numbers.
-- **Low-count genes may plateau below power 1**, because the resampling p-value has a granularity
-  floor. A two-parameter version (`gamma * Phi(...)`) would cover that, but then three points leave
-  no slack for checking. `deviance / df` per pair, which the script reports, is the diagnostic.
-- **The deviance says the model is imperfect, even though it predicts well.** Running the prototype
-  on `wtc11` (fit 0.05 / 0.1 / 0.25, predict the rest) reproduces the held-out accuracy — MAE 0.0175
-  with `--fit-z`, 0.0156 with `z` fixed at 2.045 — but reports `deviance / df` of 2.4–2.7 (median,
-  90th percentile 8.2). The earlier probit-residual check missed this because it discarded saturated
-  points; the GLM includes them, and binomial deviance is very sensitive there. So the straight line
-  is *not* the true curve at the saturated ends, while still interpolating the transition to within
-  about 1.5× the Monte-Carlo noise. Use it for interpolation, not for extrapolation past the fitted
-  range, and treat a high `deviance / df` as "check this pair" rather than as a verdict on the pair.
-- Profiling `z` did slightly *worse* than fixing it (0.0175 against 0.0156), so `--fit-z` is a
-  diagnostic for whether the threshold and the curves agree, not the recommended default.
-- The MDES columns in the table above treat the measured six-point grid as truth. It is not: each
-  point carries ±0.05, so pairs near the 0.8 boundary flip grid steps easily. Some of the 11 %
-  disagreement is the measurement being wrong rather than the fit, which pools 300 draws.
-
-#### Predicting the curve from covariates instead of measuring it
-
-The obvious extension is to skip simulation altogether: the theory says
-`SE^2 ~ (1 / n_pert_cells) * (1 / mu + 1 / theta)`, so `k = 1 / SE` should be predictable from the
-perturbed-cell count and the gene's expression, both of which the pipeline already reports per pair.
-Regressing the fitted `k` on those two, over the 6,030 `wtc11` pairs with a usable fit:
-
-```
-log(k) = -0.605 + 0.502 * log(perturbed cells) + 0.351 * log(expression)
-                       theory: 0.500              theory: 0 to 0.5
-R^2 = 0.867      residual sd of log k = 0.243  ->  k predicted to within x1.28
-```
-
-The perturbed-cell exponent lands on 0.502 against a theoretical 0.5, so the `sqrt(n)` law is
-confirmed on real data. **It is still not a substitute for measurement where per-pair claims are
-concerned.** A x1.28 error in `k` is about ±0.20 in power near the middle of a pair's transition,
-against 0.017 for the per-pair curve fit above — and that error is model error, not sampling noise,
-so it does not shrink with more simulation and is likely concentrated in particular genes rather
-spread evenly. Certifying a negative on a prediction would mis-certify a non-random subset of pairs.
-
-Where it is the right tool:
-
-- **Design counterfactuals** — the power gained from twice the cells or more gRNAs per element.
-  Measurement cannot answer these at all.
-- **Aggregate statements**, where ±0.2 per pair averages down over thousands of pairs.
-- **Choosing the effect-size grid** without a pilot run, and deciding which pairs are worth
-  simulating.
-- **Pairs never tested** — the 1,564 that failed pairwise QC on `day0`, or a planned experiment.
-
-Note one trap in the numbers above: perturbed-cell count *alone* explains only 2.3 % of the variance
-while expression alone explains 83.7 %. That is not evidence that cell count is unimportant — its
-exponent is confirmed — but that it barely varies across pairs in this dataset. Causally important,
-empirically near-constant.
-
-The defensible per-pair version, if wanted, is to calibrate the residual quantiles on a measured
-subset and widen each pair's effect-size interval by them. That gives honest intervals, merely wider
-than measured ones — and quantifies what a measured sweep is buying.
-
-#### Measured on day0, 2026-09-04: the reduced design, and calibrated intervals
-
-Everything below is on `day0` (34,886 pairs, six effect sizes, 100 replicates) and cost no new
-simulation — it is arithmetic over the stored per-replicate output.
-
-**THREE EFFECT SIZES BEAT SIX, ON THE DELIVERABLE.** Scoring each design's per-pair minimum
-detectable effect size against the full sweep, with the reference bootstrapped against itself to
-establish what its own noise allows:
-
-| Grid (100 reps) | held-out MAE (x noise floor) | MDES exact | +-1 step |
-|---|---:|---:|---:|
-| **0.1 / 0.2 / 0.25** | 0.0538 (2.83x) | **92.0 %** | 98.8 % |
-| 0.05 / 0.15 / 0.25 | 0.0358 (1.95x) | 88.5 % | 98.8 % |
-| 0.05 / 0.1 / 0.2 / 0.25 | 0.0280 (1.80x) | 87.2 % | 98.8 % |
-| 0.05 / 0.1 / 0.25 (`wtc11`'s best) | 0.0320 (1.94x) | 82.1 % | 98.7 % |
-| *reference's own ceiling* | — | *91.4 %* | *99.5 %* |
-
-The best design **exceeds the reference's self-agreement**. That is not the fit beating truth: the
-fitted curve pools 300 draws into one parameter, while the reference snaps its MDES from six
-individually noisy points. So three well-placed effect sizes are not an approximation to six — on
-the deliverable they are a lower-variance estimator.
-
-Three consequences worth carrying into the paper:
-
-- **MAE and MDES rank the grids in opposite order.** Tuning a design on interpolation error tunes
-  the wrong thing: `0.1/0.2/0.25` has the worst MAE and the best MDES, because it spends no points
-  in the saturated tails — which is exactly where MDES does not live.
-- **`wtc11`'s best grid loses on `day0`** (82.1 % against 92.0 %), confirming that grid placement is
-  dataset-specific. But the penalty is confined to *exact* agreement: every grid gives 98.7–98.8 %
-  within one step, and every grid predicts 0.15 upward to within 0.009–0.054. Only the lowest effect
-  size is sensitive to placement.
-- **Replicates degrade gently**: 92.0 / 87.5 / 83.1 / 78.7 % at 100 / 50 / 30 / 20, with a seed
-  spread of ±0.1 pt over three subsamples, so these are stable rather than lucky draws.
-
-Per-effect-size prediction error, which answers "can I get an effect size I never ran?":
-**extrapolating upward is safe and downward is not.** 0.5 is predicted to 0.014–0.016 by every grid
-including one that never saw above 0.25, because by then nearly every pair is saturated. 0.05 is
-the worst cell in the table (0.108 when extrapolated down to) and is poorly predicted even when
-*fitted* (0.057–0.079) — the one-parameter line failing at the low end.
-
-**COST.** A pilot of one effect size at 30 replicates locates the transition distribution (5 % of a
-sweep), then three points at 100 reps is 50 %, or at 50 reps 25 %. So **45–70 % saved**, and the
-grid only has to be approximately right.
-
-#### Calibrated prediction intervals: section 6 is usable after all
-
-`log(k) ~ log(pert_cells) + log(expression)` on `day0` gives `b = +0.5024` against a theoretical
-0.500 — the `sqrt(n)` law confirmed independently of `wtc11`'s 0.502 — with R² 0.909 and `k` within
-×1.258. The theoretically-derived form, `log(1/mu + 1/theta)` instead of a free power law in `mu`,
-fits better still: `b = +0.5030`, R² 0.939, `k` within ×1.206.
-
-But a point prediction carries ±0.157 in power at the median and ±0.30 at p90, which is not a
-per-pair claim. What makes it one is a calibrated interval, and **the calibration must be
-conditional on expression**:
-
-| effect size | coverage | median width | **certified by prediction** | certified by measurement |
-|---|---:|---:|---:|---:|
-| 0.15 | 90.1 % | 0.094 | **39.1 %** | 45.6 % |
-| 0.2 | 90.5 % | 0.045 | **58.9 %** | 63.0 % |
-| 0.25 | 91.3 % | 0.020 | **69.9 %** | 72.7 % |
-| 0.5 | 95.2 % | 0.000 | **88.1 %** | 91.3 % |
-
-**Prediction certifies 86–96 % of what measurement certifies**, at honest coverage, on pairs the
-calibration never saw. Global calibration gets the same average coverage but is wrong everywhere in
-particular — 99.7 % in the lowest expression stratum against 79.8 % in the middle — and its
-intervals are twice as wide. At effect size 0.5 global calibration certifies **0 %** where
-conditional certifies 88.1 %, so conditioning is not a refinement, it is what makes the method work.
-
-**Two traps recorded, because both produced plausible wrong answers:**
-
-- **Calibrate in power space, not in `k` space.** An interval on `k` claims to cover the true `k`;
-  a per-pair claim needs one that covers the measured *power*, and three errors sit between them —
-  model error in `k`, the curve's own misfit, and binomial noise. The `k`-space version gave 45 %
-  coverage against a nominal 90 %, and at saturated effect sizes produced intervals of width 0.000
-  that could not cover anything.
-- **The residual structure is not explained.** The interval width needed varies 8.61x across
-  expression deciles (1.16x across perturbed cells) as a clean inverted-U — `k` overpredicted ~1.39x
-  at both extremes, underpredicted ~1.14x in the middle. Three candidate causes were tested and all
-  three failed: the missing dispersion term (the theoretical form improved the average fit and left
-  the structure intact, 8.61x → 8.69x), poor underlying curve fits (`corr(deviance/df, |residual|)`
-  = −0.037), and a mismatched expression variable (r = 0.9999 between the two). It does not need
-  explaining for the intervals to be honest — they are calibrated empirically — but it is unexplained
-  and should not be presented as understood.
-
-Incidentally measured: **`deviance/df` rises monotonically with expression, 0.91 to 9.5.** The
-straight-line curve fails at the *high*-expression end specifically, not at both ends as previously
-recorded.
-
-#### What this needs before it can carry a paper
-
-This subsection was written as a caveat on a side result. It is no longer a side result: predicting
-power for pairs that were never simulated is the intended headline, because it is the only route to
-power for the `trans` pairs a bootstrap cannot reach (an element against genes on another chromosome —
-sceptre supports the test, but simulating it pair by pair is infeasible). The claim therefore rests on
-the least-validated result in this document, and these are the gaps, recorded so they are not
-discovered late:
-
-- **Fitted on one dataset.** Cross-dataset transfer *is* the claim, and it is untested. Needs
-  `dc_tap_paper_k562_no_shuf` (same protocol, different cell type) and **Gasperini et al.** (different
-  lab, protocol and scale) — the same two sweeps the power-curve section above needs, so one round of
-  compute serves both. Refit `log(k) ~ log(pert_cells) + log(expression)` per dataset and ask whether
-  the *coefficients* transfer, not just whether each dataset fits well on its own. A model that has to
-  be refitted per dataset is still useful but is a different, weaker claim.
-- **A ×1.28 error in `k` is ≈ ±0.20 in power mid-transition**, and it is model error, not sampling
-  noise, so it does not shrink with more replicates. It is also unlikely to be spread evenly across
-  genes. For training labels in scE2G / ENCODE-rE2G, that means mislabelled negatives concentrated in
-  a non-random subset of pairs — which is worse for a classifier than uniform noise. Quantify *which*
-  pairs the residuals concentrate in (expression decile? dispersion? cell count?) rather than
-  reporting the residual sd alone.
-- **The covariate model is close to a one-covariate model on this data.** Expression alone explains
-  83.7 % of the variance in `k`, perturbed cells alone 2.3 %. The `sqrt(n)` exponent is confirmed at
-  0.502 against a theoretical 0.500, so cell count is causally right and empirically near-constant
-  *here* — but a reviewer will ask, and a dataset with real variation in perturbed-cell count is what
-  answers it. Gasperini et al. differs enough in scale to provide that.
-- **The `trans` case needs a demonstration, not an argument.** Simulate a tractable subset of `trans`
-  pairs directly, then compare against what the covariate model predicts for them. Without that, the
-  headline is an extrapolation from `cis` pairs to a regime where nothing has been measured — and
-  `trans` pairs may differ systematically, since the gene sets are not matched to the element's
-  neighbourhood.
-- **Calibrated intervals should be a contribution, not a footnote.** Prediction plus honest
-  residual-calibrated intervals is a defensible per-pair claim; a point prediction with ±0.20 is not.
-
-Prior art to check before writing any of this up: **scPower** (Schmid et al.) is the work reviewers
-will name, and the claim that no satisfying method exists needs an actual literature search rather
-than an assumption.
-
----
+**The validation — whether three points really do reproduce six, the covariate model that predicts
+the curve for pairs never simulated, and the calibrated prediction intervals — moved to
+[broadinstitute/WattEG-paper](https://github.com/broadinstitute/WattEG-paper) on 2026-09-04**, with
+the rest of the paper analyses. Short version of what it established, so a pipeline user knows what
+the feature is worth: the best three-point design reproduced the six-point per-pair MDES for 92.0 %
+of pairs on `day0`, against a reference whose own bootstrapped self-agreement was 91.4 %. Grid
+placement is dataset-specific and a one-effect-size pilot is enough to choose it.
 
 ## Running the comparisons on the cluster
 
 ### Setup
 
 ```sh
-git clone https://github.com/EngreitzLab/element-gene-power-analysis.git
-cd element-gene-power-analysis
+git clone https://github.com/EngreitzLab/WattEG.git
+cd WattEG
 pixi install
 pixi run setup        # compiles sceptre; needs a compiler and network
 pixi run check-api    # must print "All checks passed"
@@ -1437,51 +1164,13 @@ Recorded so they are not relitigated:
 
 ## The analysis question this is all for
 
-Recorded because it determines which columns matter, and therefore how many replicates to buy.
-
-The goal is **false-negative triage**: for a pair CRISPRi did not call, is the link absent,
-or could the experiment not have seen one? Three consequences follow, and
-[Output]({{ site.baseurl }}{% link output.md %}#interpreting-negatives) explains each in full.
-
-**1. Threshold `power_ci_low`, never `power`.** "This negative is biological" asserts that power was
-*at least* 0.8. Certifying that needs 88/100 successes — or 29/30, which is why 30 replicates is
-unusable for this question regardless of what the precision tables say. At 0.15 and 100 replicates,
-under `null_fit` (`power_null_fit/power_es0.15.tsv`): **38.3 % of pairs certified, 12.6 % ambiguous,
-49.0 % clearly underpowered** (that last half is not a replicate problem — it needs more perturbed
-cells or a larger effect). The `as_is` run gave 37.5 / 12.6 / 49.9.
-
-**2. Minimum detectable effect size is the deliverable, not six power columns.** `summarize_power.R`
-now emits `min_detectable_effect_size` plus a `_ci_low` / `_ci_high` bracket, where `_ci_high` is
-derived from `power_ci_low`: the interval inverts, as power rises with effect size. It turns the
-sweep into one sentence per pair: *"we would have caught a knockdown of ≥ 25 %, so the absence of a
-call rules out effects that large."* Qualifying requires clearing the threshold at that effect size
-**and every larger one tested**; taking the first effect size that clears lets noise bias
-every pair towards looking more detectable than it is.
-
-**3. Per-element power needs reframing before it can be reported.** The tempting version — "this
-element is well powered whatever gene you pair it with" — is not what the data say. At 0.15 only
-**20.9 %** of the variance in per-pair power is between elements; 79 % is gene to gene within an
-element, the mean within-element SD is **0.34**, and element mean power correlates with
-`mean_pert_cells` at only 0.38. A mean over the pairs an element happens to have tested is also
-incomparable between elements: it inherits the expression levels of whichever genes sit nearby.
-
-The defensible framing is conditional: per-pair power answers *"could we have detected this link?"*,
-per-element power answers *"how well did we perturb this element?"* — whose sufficient statistic is
-the perturbed-cell count, not anything about genes. Report it at a reference gene: "for a gene at
-median expression, element E has 0.7 power at a 15 % knockdown."
-
-**Not implemented.** The fit is cheap and needs no new simulation — `power_summary.tsv` already
-carries `mean_pert_cells` and `average_expression_all_cells` per pair, so fitting
-`power ~ f(pert_cells, expression)` and evaluating at reference expression is post-processing.
-Simulating a reference-gene panel instead would cost ~450 CPU-h, because the per-target term
-is paid whether a target carries one gene or thirty. Whoever picks this up should decide where it
-lives: a new `src/` script, or a section of `summarize_power.R`.
-
-What *does* hold at element level is a floor: **21.9 % of elements (663/3,026) have no tested pair
-that could have reached power 0.8**, so they cannot support a "regulates nothing" claim under any
-reading, and they should be excluded from biological interpretation rather than reported as null
-results. Conversely only **5 of 3,026** elements have every tested pair certified — element-wide
-negative claims are essentially never assertable at 100 replicates and a 15 % knockdown.
+False-negative triage: for a pair CRISPRi did not call, is the link absent, or could the experiment
+not have seen one? That framing, what it implies for which columns matter, and the per-element
+caveats moved to [broadinstitute/WattEG-paper](https://github.com/broadinstitute/WattEG-paper) with
+the paper analyses. What it means for this repo is unchanged and documented in
+[Output]({{ site.baseurl }}{% link output.md %}#interpreting-negatives): threshold `power_ci_low`
+rather than `power`, and treat `min_detectable_effect_size` as the deliverable rather than the
+per-effect-size power columns.
 
 ## Open questions
 

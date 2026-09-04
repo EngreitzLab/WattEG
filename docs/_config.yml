@@ -21,7 +21,7 @@ heading_anchors: true
 
 aux_links:
   "GitHub repository":
-    - "https://github.com/EngreitzLab/element-gene-power-analysis"
+    - "https://github.com/EngreitzLab/WattEG"
 
 # Only the documentation lives here; nothing else in the repo should be published.
 exclude:

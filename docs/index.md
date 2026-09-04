@@ -3,7 +3,7 @@ title: Overview
 nav_order: 1
 ---
 
-# element-gene-power-analysis
+# WattEG
 
 Power analysis for element–gene pairs in single-cell CRISPR screens, built on
 [sceptre](https://katsevich-lab.github.io/sceptre/).

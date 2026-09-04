@@ -70,7 +70,7 @@ option_list <- list(
               help = "Output TSV, one row per pair."),
   make_option("--subsample-reps", type = "integer", default = NULL, dest = "subsample_reps",
               help = paste("Compute power from this many randomly chosen replicates instead of",
-                           "all of them. For the reduced-design study in paper/experiments.md;",
+                           "all of them. For the reduced-design study in broadinstitute/WattEG-paper;",
                            "has no place in a production run, where every replicate that was paid",
                            "for should be used.")),
   make_option("--subsample-seed", type = "integer", default = 1L, dest = "subsample_seed",
@@ -149,8 +149,8 @@ if (anyDuplicated(sims[, c("grna_target", "response_id", "rep")])) {
 
 # --- optional: keep only a subsample of the replicates ------------------------------------------
 #
-# For the reduced-design study in paper/experiments.md, which asks whether fewer replicates and
-# fewer effect sizes reproduce the full design. That question is answered by SUBSAMPLING an existing
+# For the reduced-design study in broadinstitute/WattEG-paper, which asks whether fewer replicates
+# and fewer effect sizes reproduce the full design. That question is answered by SUBSAMPLING an existing
 # sweep rather than by running smaller ones: replicates are i.i.d. draws, so a random subset of 30
 # is distributed exactly like a fresh 30-replicate run, and subsampling makes the comparison paired
 # -- the same pairs, the same simulated data -- which a rerun would not be.
