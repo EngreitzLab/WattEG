@@ -396,10 +396,34 @@ if (result_idx == 0L) {
 }
 combined <- do.call(rbind, results)
 
-# average_expression_all_cells is reported alongside each pair so downstream tables can relate
-# power to expression level without reloading the sceptre object.
-combined$average_expression_all_cells <-
-  sim$row_data$average_expression_all_cells[match(combined$response_id, sim$genes)]
+# Keep only what a reader needs. sceptre's get_result() returns more than this, and at 100
+# replicates x 34,886 pairs x 6 effect sizes the extra columns were 39 % of a 3 GB output:
+#
+#   fold_change                   2^log_2_fold_change -- the same number twice
+#   se_fold_change                read by nothing downstream
+#   significant                   sceptre's own call at ITS threshold, not the discovery threshold
+#                                 this pipeline tests against. compute_power.R recomputes it from
+#                                 p_value and log_2_fold_change, so keeping it invites the wrong
+#                                 column being believed
+#   average_expression_all_cells  a per-GENE constant repeated once per replicate; summarize_power.R
+#                                 now joins it from sim_input.rds, where it lives once
+#
+# Kept deliberately, despite also being constant per pair or per file:
+#
+#   effect_size                   compute_power.R refuses an input that mixes effect sizes, and that
+#                                 check reads this column. 3 % of the output for a guard against
+#                                 silently averaging power across knockdown levels
+#   pass_qc, n_nonzero_trt/cntrl  diagnostics. The first thing to look at when a pair's power is
+#                                 surprising, and there is nowhere else to recover them from
+keep <- c("grna_target", "response_id", "p_value", "log_2_fold_change", "rep", "effect_size",
+          "num_pert_cells", "pass_qc", "n_nonzero_trt", "n_nonzero_cntrl")
+present <- intersect(keep, colnames(combined))
+dropped <- setdiff(colnames(combined), present)
+if (length(dropped) > 0) {
+  log_step("Dropping ", length(dropped), " column(s) nothing downstream reads: ",
+           paste(dropped, collapse = ", "))
+}
+combined <- combined[, present, drop = FALSE]
 
 write_tsv_file(combined, opts$out)
 log_step("Wrote ", nrow(combined), " rows to ", opts$out)

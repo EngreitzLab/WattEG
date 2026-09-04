@@ -25,7 +25,10 @@ process POWER_SIMULATION {
     // per-replicate p-values, they let a run be compared split by split against the other runner,
     // and re-deriving one costs a full task. This is the bulky output -- ~1,000 files per effect
     // size, a few hundred MB in total.
-    publishDir "${params.outdir}/${meta.id}/sim/es${effect_size}", mode: params.publish_mode
+    // per_replicate, not sim: a row here is one (pair, replicate) test result, and "sim" said nothing
+// about that. This is the only output from which power can be RE-derived -- subsampling replicates
+// to study reduced designs, or bootstrapping -- so it is worth keeping and worth naming clearly.
+    publishDir "${params.outdir}/${meta.id}/per_replicate/es${effect_size}", mode: params.publish_mode
 
     input:
     tuple val(meta), path(sim_input), path(sceptre_template), path(grna_targets),
@@ -38,7 +41,7 @@ process POWER_SIMULATION {
     // The replicate range is part of the filename so chunks of one split cannot collide, and so a
     // stray file is attributable. With no chunking (reps_per_chunk == num_replicates) there is
     // exactly one per split, which is what every measured run has done.
-    out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv"
+    out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv.gz"
     """
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         Rscript ${projectDir}/src/run_power_simulation.R \\
@@ -58,7 +61,7 @@ process POWER_SIMULATION {
     # a smaller denominator for the affected pairs.
     n_pairs=\$(( \$(wc -l < ${split}) - 1 ))
     expected=\$(( n_pairs * ${reps} + 1 ))
-    actual=\$(wc -l < ${out_name})
+    actual=\$(gzip -cd ${out_name} | wc -l)
     if [ "\${actual}" -ne "\${expected}" ]; then
         echo "ERROR: wrote \${actual} lines, expected \${expected} (\${n_pairs} pairs x ${reps} reps + header)." >&2
         exit 1
@@ -66,8 +69,8 @@ process POWER_SIMULATION {
     """
 
     stub:
-    out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv"
+    out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv.gz"
     """
-    touch ${out_name}
+    printf '' | gzip > ${out_name}
     """
 }

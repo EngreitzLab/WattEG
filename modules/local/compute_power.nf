@@ -25,8 +25,11 @@ process COMPUTE_POWER {
     """
     # A comma-separated list rather than a glob: compute_power.R accepts either, but an explicit
     # list is a single token and its ordering is stable.
-    sim_list=\$(ls sim/*.tsv | paste -sd, -)
-    echo "combining \$(ls sim/*.tsv | wc -l) simulation file(s)"
+    # Both forms matched: the per-replicate output is gzipped, but an older sweep being
+    # re-aggregated is plain .tsv. Missing the .gz here would have found no files and produced an
+    # empty power table rather than an error.
+    sim_list=\$(ls sim/*.tsv.gz sim/*.tsv 2>/dev/null | paste -sd, -)
+    echo "combining \$(ls sim/*.tsv.gz sim/*.tsv 2>/dev/null | wc -l) simulation file(s)"
 
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         Rscript ${projectDir}/src/compute_power.R \\

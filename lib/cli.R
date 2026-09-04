@@ -84,12 +84,27 @@ read_tsv_file <- function(path, required_columns = character(0)) {
   df
 }
 
+#' Write a TSV, gzipped when the path ends in .gz.
+#'
+#' `write.table(file = "x.gz")` does NOT compress -- it writes plain text to a file that merely has
+#' a misleading name, and every reader then either fails or silently gets the wrong bytes. A
+#' `gzfile()` connection is what actually compresses, and it has to be closed explicitly.
+#'
+#' Reading needs no counterpart: `read.delim` goes through `file()`, which sniffs the magic number
+#' and decompresses transparently, so `read_tsv_file` handles either form unchanged.
 write_tsv_file <- function(df, path) {
   dir <- dirname(path)
   if (!dir.exists(dir)) {
     dir.create(dir, recursive = TRUE)
   }
-  utils::write.table(df, file = path, sep = "\t", quote = FALSE,
+  target <- if (grepl("[.]gz$", path)) {
+    con <- gzfile(path, "w")
+    on.exit(close(con), add = TRUE)
+    con
+  } else {
+    path
+  }
+  utils::write.table(df, file = target, sep = "\t", quote = FALSE,
                      row.names = FALSE, col.names = TRUE)
   invisible(path)
 }

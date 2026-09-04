@@ -163,7 +163,16 @@ if (!is.null(opts$sim_input)) {
   # read as different quantities; the theory term is therefore `1/gene_mean + dispersion`.
   out$gene_mean <- rd$mean[gi]
   out$dispersion <- rd$dispersion[gi]
-  log_step("Joined per-gene mean and dispersion from ", opts$sim_input)
+
+  # average_expression_all_cells comes from here too, and only from here, now that
+  # run_power_simulation.R no longer repeats it once per replicate. If an older power table still
+  # carries it, the value already set from `shared` above is kept -- they are the same number, and
+  # not overwriting it keeps a re-summarised old sweep byte-identical.
+  if (!"average_expression_all_cells" %in% colnames(out) ||
+        all(is.na(out$average_expression_all_cells))) {
+    out$average_expression_all_cells <- rd$average_expression_all_cells[gi]
+  }
+  log_step("Joined per-gene mean, dispersion and expression from ", opts$sim_input)
 }
 
 # Per-effect-size columns.

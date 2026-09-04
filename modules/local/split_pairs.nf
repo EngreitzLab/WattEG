@@ -14,7 +14,11 @@
 process SPLIT_PAIRS {
     tag "${meta.id}"
 
-    publishDir "${params.outdir}/${meta.id}/splits", mode: params.publish_mode
+// NOT published. The splits are parallelisation bookkeeping, not a result: they are 1,000 files and
+// 1,000 inodes per sample, and they are fully regenerable -- the LPT bin packing is deterministic
+// given pairs.tsv and n_splits, which docs/status.md confirms reproduces the on-disk splits exactly.
+// The pairs themselves are already published in prepared/pairs.tsv. They stay in the work directory
+// where Nextflow needs them for the fan-out, and go when it is cleaned.
 
     input:
     tuple val(meta), path(pairs)

@@ -118,7 +118,7 @@ paths <- trimws(strsplit(opts$simulations, ",", fixed = TRUE)[[1]])
 # re-aggregate an existing sweep (the reduced-design study does this hundreds of times) is a
 # 100 KB argument list for no benefit. Sorted, so the row order does not depend on readdir order.
 expanded <- unlist(lapply(paths, function(p) {
-  if (dir.exists(p)) sort(list.files(p, pattern = "[.]tsv$", full.names = TRUE)) else p
+  if (dir.exists(p)) sort(list.files(p, pattern = "[.]tsv([.]gz)?$", full.names = TRUE)) else p
 }), use.names = FALSE)
 if (length(expanded) == 0) {
   stop("--simulations matched no files: ", opts$simulations, call. = FALSE)
