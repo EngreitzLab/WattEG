@@ -67,7 +67,16 @@ option_list <- list(
   make_option("--conf-level", type = "double", default = 0.95, dest = "conf_level",
               help = "Confidence level for the Wilson interval [default %default]."),
   make_option("--out", type = "character", default = NULL, dest = "out",
-              help = "Output TSV, one row per pair.")
+              help = "Output TSV, one row per pair."),
+  make_option("--subsample-reps", type = "integer", default = NULL, dest = "subsample_reps",
+              help = paste("Compute power from this many randomly chosen replicates instead of",
+                           "all of them. For the reduced-design study in paper/experiments.md;",
+                           "has no place in a production run, where every replicate that was paid",
+                           "for should be used.")),
+  make_option("--subsample-seed", type = "integer", default = 1L, dest = "subsample_seed",
+              help = paste("Seed for --subsample-reps [default %default]. Vary it to repeat the",
+                           "same reduced design over different subsets and report the spread,",
+                           "which is what turns a single comparison into an error bar."))
 )
 
 opts <- parse_args(OptionParser(
@@ -102,6 +111,19 @@ if (!is.finite(threshold) || threshold <= 0 || threshold > 1) {
 ## LOAD ============================================================================================
 
 paths <- trimws(strsplit(opts$simulations, ",", fixed = TRUE)[[1]])
+
+# A directory expands to the TSVs inside it. The Nextflow runner passes an explicit file list, which
+# is what makes the replicate-count check below meaningful -- it validates the files it was handed.
+# But a sweep publishes 1,000 files per effect size, and naming them all on a command line to
+# re-aggregate an existing sweep (the reduced-design study does this hundreds of times) is a
+# 100 KB argument list for no benefit. Sorted, so the row order does not depend on readdir order.
+expanded <- unlist(lapply(paths, function(p) {
+  if (dir.exists(p)) sort(list.files(p, pattern = "[.]tsv$", full.names = TRUE)) else p
+}), use.names = FALSE)
+if (length(expanded) == 0) {
+  stop("--simulations matched no files: ", opts$simulations, call. = FALSE)
+}
+paths <- expanded
 required <- c("grna_target", "response_id", "p_value", "log_2_fold_change", "rep")
 sims <- do.call(rbind, lapply(paths, read_tsv_file, required_columns = required))
 log_step("Read ", nrow(sims), " replicate rows from ", length(paths), " file(s)")
@@ -123,6 +145,37 @@ if (anyDuplicated(sims[, c("grna_target", "response_id", "rep")])) {
   n_dup <- sum(duplicated(sims[, c("grna_target", "response_id", "rep")]))
   stop(n_dup, " duplicated (grna_target, response_id, rep) row(s). Overlapping --rep-offset ",
        "values across chunks would double-count replicates.", call. = FALSE)
+}
+
+# --- optional: keep only a subsample of the replicates ------------------------------------------
+#
+# For the reduced-design study in paper/experiments.md, which asks whether fewer replicates and
+# fewer effect sizes reproduce the full design. That question is answered by SUBSAMPLING an existing
+# sweep rather than by running smaller ones: replicates are i.i.d. draws, so a random subset of 30
+# is distributed exactly like a fresh 30-replicate run, and subsampling makes the comparison paired
+# -- the same pairs, the same simulated data -- which a rerun would not be.
+#
+# The SAME replicate ids are kept for every pair, deliberately. A replicate index is arbitrary, so
+# one shared subset is the faithful analogue of "we ran 30 replicates"; drawing an independent
+# subset per pair would average over more of the replicate noise than a real 30-replicate run does
+# and would flatter the reduced design.
+#
+# Sampling from the observed ids rather than 1:reps because rows with a missing fold change have
+# already been dropped above, so a pair can have fewer than --reps replicates present.
+if (!is.null(opts$subsample_reps)) {
+  available <- sort(unique(sims$rep))
+  if (opts$subsample_reps > length(available)) {
+    stop("--subsample-reps ", opts$subsample_reps, " exceeds the ", length(available),
+         " replicate(s) present.", call. = FALSE)
+  }
+  set.seed(opts$subsample_seed)
+  keep <- sort(sample(available, opts$subsample_reps))
+  sims <- sims[sims$rep %in% keep, , drop = FALSE]
+  log_step("Subsampled to ", length(keep), " of ", length(available), " replicates ",
+           "(seed ", opts$subsample_seed, "): ", nrow(sims), " rows remain")
+  if (nrow(sims) == 0) {
+    stop("No replicate rows remain after subsampling.", call. = FALSE)
+  }
 }
 
 ## AGGREGATE =======================================================================================
@@ -179,7 +232,7 @@ message(sprintf("  mean power: %.3f | pairs at 0: %d | at 1: %d | in (0.1,0.9): 
 message(sprintf("  median 95%% CI width: %.3f  (widest %.3f)",
                 stats::median(power$power_ci_high - power$power_ci_low),
                 max(power$power_ci_high - power$power_ci_low)))
-if (min(power$n_reps) < 100) {
+if (min(power$n_reps) < 100 && is.null(opts$subsample_reps)) {
   message("  note: with fewer than ~100 replicates a per-pair estimate is coarse; see ",
           "docs/choosing-num-replicates.md")
 }
