@@ -69,10 +69,30 @@ option_list <- list(
   make_option("--genes-per-target", type = "integer", default = 2L, dest = "genes_per_target",
               help = "Genes each target really regulates [default %default]."),
   make_option("--seed", type = "integer", default = 20250812L, dest = "seed",
-              help = "RNG seed [default %default].")
+              help = "RNG seed [default %default]."),
+  # The two axes the pipeline inherits from the object rather than setting, so they are the two it
+  # can only be shown to handle by building an object that carries them. See
+  # sceptre_analysis_mode() in lib/sceptre_io.R for why they are worth varying.
+  make_option("--moi", type = "character", default = "high", dest = "moi",
+              help = paste("'high' or 'low' [default %default]. High MOI makes the control group",
+                           "the complement; low MOI makes it the NT cells, a path no real dataset",
+                           "has yet taken through this pipeline.")),
+  make_option("--resampling-mechanism", type = "character", default = "default",
+              dest = "resampling_mechanism",
+              help = paste("'crt', 'permutations' or 'default' [default %default]. 'default'",
+                           "resolves to crt for high MOI and permutations for low MOI, which is",
+                           "the implicit coupling worth being able to override here."))
 )
 opts <- parse_args(OptionParser(option_list = option_list))
 require_options(opts, "out")
+
+if (!opts$moi %in% c("high", "low")) {
+  stop("--moi must be 'high' or 'low', not '", opts$moi, "'.", call. = FALSE)
+}
+if (!opts$resampling_mechanism %in% c("crt", "permutations", "default")) {
+  stop("--resampling-mechanism must be 'crt', 'permutations' or 'default', not '",
+       opts$resampling_mechanism, "'.", call. = FALSE)
+}
 
 init_seed(opts$seed)
 
@@ -186,11 +206,13 @@ discovery_pairs <- expand.grid(
 
 log_step("Importing into sceptre (", nrow(discovery_pairs), " candidate pairs)")
 
+log_step("MOI: ", opts$moi, ", resampling mechanism: ", opts$resampling_mechanism)
+
 so <- import_data(
   response_matrix = response_matrix,
   grna_matrix = grna_matrix,
   grna_target_data_frame = grna_target_data_frame,
-  moi = "high",
+  moi = opts$moi,
   extra_covariates = extra_covariates
 )
 
@@ -198,7 +220,8 @@ so <- set_analysis_parameters(
   sceptre_object = so,
   discovery_pairs = discovery_pairs,
   side = "left",
-  grna_integration_strategy = "union"
+  grna_integration_strategy = "union",
+  resampling_mechanism = opts$resampling_mechanism
 )
 
 log_step("Assigning gRNAs")

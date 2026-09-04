@@ -1399,6 +1399,39 @@ negative claims are essentially never assertable at 100 replicates and a 15 % kn
   fastest (55.8s against 20.5s per replicate). There was no preemption to blame (999 COMPLETED,
   1 FAILED). Set `--target-overhead 8.6` if `N_SPLITS` ever drops far enough that splits hold ten or
   more targets; do not re-split an array for it.
+- **High MOI is a hard requirement, and now a measured one. Low MOI does not work.** Found by
+  running the synthetic generator's new `--moi` / `--resampling-mechanism` variants end to end
+  (`13_make_test_data.sbatch`, 2026-09-03):
+
+  | Variant | `@response_precomputations` | End to end |
+  |---|---:|---|
+  | high MOI / crt | 30 | passes |
+  | high MOI / permutations | 30 | **passes** |
+  | low MOI / permutations | **0** | **fails** |
+
+  So **permutations is supported** — it was the untested axis and it works, which also means an
+  odm-backed screen (forced onto permutations) is fine on this axis. The failure is MOI alone:
+
+  ```
+  Error: @response_precomputations is empty, so no dispersions can be derived.
+  ```
+
+  Under low MOI the control group is the NT cells rather than the complement, and sceptre never
+  populates the per-gene precomputation cache that `prepare_sim_input.R` reads per-gene
+  negative-binomial dispersions (`$theta`) out of. This is not a missing branch in our code, it is
+  a different source of dispersions: supporting low MOI means fitting them ourselves, or calling
+  `perform_response_precomputation()` directly per gene, and then validating the result against the
+  cached values on a high-MOI object. Deliberately deferred, not attempted.
+
+  Note the error a low-MOI user currently gets names the empty slot rather than the MOI, so it
+  reads like a corrupt object rather than an unsupported configuration.
+
+- **`grna_integration_strategy` must be `union`**, rejected explicitly at `lib/sceptre_io.R:55`
+  because the target-level perturbation matrix and the discovery pairs are both keyed by target.
+  `singleton` and `bonferroni` fail fast with that message rather than silently producing
+  target-keyed output from gRNA-keyed pairs. Untested against low MOI, and expected to be
+  independent of it: the precomputation cache above is per-gene, not per-gRNA-grouping.
+
 - **Which test a screen ran is now read, not assumed.** `prepare_sim_input.R` reads
   `@run_permutations` and `@low_moi` off the object, logs them, and writes `analysis_mode.tsv`
   beside `discovery_threshold.txt`; `run_power_simulation.R` logs the same on every task. This

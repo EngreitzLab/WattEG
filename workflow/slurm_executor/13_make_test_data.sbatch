@@ -17,27 +17,66 @@
 # and then runs prepare -> split -> null models -> simulate -> power end to end, at a scale that
 # finishes in minutes.
 #
+# MOI and RESAMPLING select which kind of screen to synthesise. They exist because these are the
+# two settings the pipeline INHERITS from the object rather than setting, so the only way to show it
+# handles them is to build an object that carries them:
+#
+#   MOI=high RESAMPLING=default        crt          the default, and what every real dataset is
+#   MOI=low  RESAMPLING=default        permutations low MOI resolves to permutations on its own
+#   MOI=high RESAMPLING=permutations   permutations separates the mechanism from the MOI
+#
+# The third matters because the first two confound them: without it, a permutations failure could
+# not be told apart from a low-MOI failure.
+#
 # Usage:  sbatch workflow/slurm_executor/13_make_test_data.sbatch
+#         MOI=low sbatch workflow/slurm_executor/13_make_test_data.sbatch
+#         MOI=high RESAMPLING=permutations sbatch workflow/slurm_executor/13_make_test_data.sbatch
 
 _cmd="$(scontrol show job "${SLURM_JOB_ID:-0}" 2>/dev/null | sed -n 's/.*Command=\([^[:space:]]*\).*/\1/p' | head -1)"
 source "$(cd "$(dirname "${_cmd:-$0}")" && pwd)/config.sh"
 
-log_header "Step 13: synthetic test data, and the pipeline on it"
+MOI="${MOI:-high}"
+RESAMPLING="${RESAMPLING:-default}"
+
+log_header "Step 13: synthetic test data (moi=${MOI}, resampling=${RESAMPLING}), and the pipeline on it"
 
 load_pixi
 
-OBJ="${REPO_ROOT}/tests/data/sceptre_object.rds"
-WORK="${SCRATCH}/synthetic_pipeline_check"
+# Variant-suffixed, so running one does not clobber another's object or outputs and the three can
+# run concurrently.
+VARIANT="${MOI}_${RESAMPLING}"
+OBJ="${REPO_ROOT}/tests/data/sceptre_object_${VARIANT}.rds"
+WORK="${SCRATCH}/synthetic_pipeline_check_${VARIANT}"
 rm -rf "${WORK}"
-mkdir -p "${WORK}"
+mkdir -p "${WORK}" "$(dirname "${OBJ}")"
 
 echo
 echo ">>> generating"
-pixi_run Rscript src/make_test_data.R --out "${OBJ}"
+pixi_run Rscript src/make_test_data.R --out "${OBJ}" \
+    --moi "${MOI}" --resampling-mechanism "${RESAMPLING}"
 
 echo
 echo ">>> step 1: prepare"
 pixi_run Rscript src/prepare_sim_input.R --sceptre-object "${OBJ}" --outdir "${WORK}/prepared"
+
+# The point of the variants: check the pipeline REPORTS the screen it was actually handed. A run
+# that silently analysed a low-MOI permutations screen as though it were high-MOI CRT would produce
+# plausible numbers, so this asserts rather than prints.
+echo
+echo ">>> checking the reported analysis mode"
+cat "${WORK}/prepared/analysis_mode.tsv"
+expected_moi="${MOI}"
+expected_mech="${RESAMPLING}"
+if [[ "${expected_mech}" == "default" ]]; then
+  expected_mech=$([[ "${MOI}" == "low" ]] && echo permutations || echo crt)
+fi
+got_moi=$(awk -F'\t' '$1=="moi"{print $2}' "${WORK}/prepared/analysis_mode.tsv")
+got_mech=$(awk -F'\t' '$1=="resampling_mechanism"{print $2}' "${WORK}/prepared/analysis_mode.tsv")
+if [[ "${got_moi}" != "${expected_moi}" || "${got_mech}" != "${expected_mech}" ]]; then
+  echo "FAIL: built moi=${expected_moi}/${expected_mech} but the pipeline reports ${got_moi}/${got_mech}" >&2
+  exit 1
+fi
+echo "  ok: reports ${got_moi} MOI, ${got_mech}"
 
 # n_splits must not exceed the number of targets; the synthetic object has far fewer than a real
 # one, which is exactly the kind of mismatch a CI run should catch rather than inherit.
