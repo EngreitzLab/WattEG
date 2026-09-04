@@ -29,13 +29,21 @@ this_script_dir <- function() {
 #' Candidate locations for lib/, most specific first.
 #'
 #' The repo layout is `src/<script>.R` with `lib/` at the root, so the usual answer is one level up
-#' from the script. Two other shapes have to keep working: a workflow engine that stages every input
-#' into a single flat task directory (Nextflow does this), which puts lib/ beside the script or
-#' dissolves it entirely; and being run from the repo root with no `--file=`, where
-#' `this_script_dir()` is the working directory.
+#' from the script. Three other shapes have to keep working: a workflow engine that stages every
+#' input into a single flat task directory (Nextflow does this), which puts lib/ beside the script or
+#' dissolves it entirely; being run from the repo root with no `--file=`, where `this_script_dir()`
+#' is the working directory; and a script that lives OUTSIDE this repo entirely.
+#'
+#' That last one is why `WATTEG_ROOT` is honoured, and it is checked first. Analyses in
+#' broadinstitute/WattEG-paper depend on this repo rather than vendoring it, so their scripts sit in
+#' a different tree and nothing script-relative can find `lib/`. Note that the sbatch runner
+#' executes every script inside apptainer with `--cleanenv`, so a caller has to pass the variable as
+#' `APPTAINERENV_WATTEG_ROOT` for it to arrive here at all.
 lib_dirs <- function() {
   here <- this_script_dir()
-  unique(c(file.path(dirname(here), "lib"), file.path(here, "lib"), here))
+  root <- Sys.getenv("WATTEG_ROOT", unset = "")
+  unique(c(if (nzchar(root)) file.path(root, "lib"),
+           file.path(dirname(here), "lib"), file.path(here, "lib"), here))
 }
 
 #' Source one or more files from lib/.
