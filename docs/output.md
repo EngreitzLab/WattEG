@@ -15,6 +15,8 @@ One row per element–gene pair, one set of columns per effect size.
 | `response_id` | Gene. |
 | `mean_pert_cells` | Mean number of perturbed cells across replicates. |
 | `average_expression_all_cells` | Raw mean expression of the gene across all cells. Not size-factor normalised — see the note below. |
+| `gene_mean` | The gene's size-factor-normalised mean (`mu`). Present only when `--sim-input` was supplied. **Not the same as `average_expression_all_cells`**: they correlate at r = 0.9999 but differ by a scale factor, and `mu` is the one the theory below uses. |
+| `dispersion` | The gene's negative-binomial dispersion, **`1/theta`** rather than `theta` — the same convention `sim_input.rds` and `rnbinom(size = 1/dispersion)` use. Present only when `--sim-input` was supplied. |
 | `power_at_effect_size_15` | Power at a 15% knockdown. One column per effect size; the suffix is `effect_size × 100`, with any decimal point written as an underscore (0.125 → `power_at_effect_size_12_5`). |
 | `power_at_effect_size_15_ci_low`, `_ci_high` | 95% Wilson interval for that estimate. |
 | `power_at_effect_size_15_n_reps` | Replicates contributing to it. |
@@ -43,6 +45,27 @@ whose true power is 0.75 clears 0.8 about a third of the time, so across six eff
 early clear is likely, and the error only ever runs one way — reporting the pair as more detectable
 than it is. Effect sizes a pair was not tested at count as unknown, not as failures, so they do not
 block the run.
+
+### Why `gene_mean` and `dispersion` are here
+
+Power for a pair is governed by
+
+```
+SE^2 ~ (1 / n_pert_cells) * (1 / mu + 1 / theta)
+```
+
+so anything that models power from covariates needs the gene's dispersion alongside its expression
+and the perturbed-cell count. Until these columns existed, only `average_expression_all_cells`
+reached this table and every such analysis had to load a 16 MB `sim_input.rds` to find the rest.
+
+With the convention above, the bracket is `1/gene_mean + dispersion` — no conversion, because
+`dispersion` already *is* `1/theta`.
+
+They are joined by `summarize_power.R` at summary time rather than emitted per replicate, because
+they are per-gene constants: putting them in the simulation output would only help sweeps run after
+the change, while re-summarising an existing sweep from its stored power tables takes seconds. Both
+columns are absent if `--sim-input` is not passed, so older outputs and hand-run summaries are
+unaffected.
 
 ## Interpreting a negative result
 {: #interpreting-negatives }

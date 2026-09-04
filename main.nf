@@ -199,7 +199,18 @@ workflow {
         .map { meta, es, power -> [meta, power] }
         .groupTuple()
 
-    SUMMARIZE_POWER(ch_all_power)
+    // sim_input rides along so the summary can carry the gene's dispersion and normalised mean.
+    // Joined at this step rather than emitted per replicate: it is a per-GENE constant, and adding
+    // it to the simulation output would only help sweeps run after the change, whereas summarising
+    // again from stored power tables costs seconds and works on sweeps already finished.
+    //
+    // `.join` on the meta key, NOT two separate input channels. Nextflow pairs multiple input
+    // channels positionally, so with more than one sample the power tables of one could be matched
+    // to the sim_input of another -- silently, producing a summary whose dispersions belong to a
+    // different dataset. Joining on the key makes that impossible.
+    ch_summary_in = ch_all_power.join(PREPARE_SIM_INPUT.out.sim_input)
+
+    SUMMARIZE_POWER(ch_summary_in)
 }
 
 workflow.onComplete {

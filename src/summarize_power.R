@@ -44,7 +44,12 @@ option_list <- list(
               help = paste("Power level used to derive min_detectable_effect_size: the smallest",
                            "tested effect size at which a pair reaches it [default %default].")),
   make_option("--out", type = "character", default = NULL, dest = "out",
-              help = "Output TSV, one row per pair.")
+              help = "Output TSV, one row per pair."),
+  make_option("--sim-input", type = "character", default = NULL, dest = "sim_input",
+              help = paste("sim_input.rds from prepare_sim_input.R. Optional. Supplied, the gene's",
+                           "negative-binomial dispersion and normalised mean are joined onto each",
+                           "pair, which makes this table self-sufficient for covariate modelling.",
+                           "Omitted, those columns are absent and everything else is unchanged."))
 )
 
 opts <- parse_args(OptionParser(
@@ -117,6 +122,48 @@ for (column in shared) {
             sum(spread > 1e-6, na.rm = TRUE), " pair(s); reporting the first non-missing value.")
   }
   out[[column]] <- apply(values, 1, function(v) if (all(is.na(v))) NA_real_ else v[!is.na(v)][1])
+}
+
+# Per-gene values from sim_input, joined here rather than carried through the simulation.
+#
+# WHY HERE. The theory behind the power curve is SE^2 ~ (1/n_pert_cells) * (1/mu + 1/theta), so any
+# covariate model of power needs the gene's dispersion as well as its expression. Only
+# `average_expression_all_cells` reaches this table through the per-replicate output, so every such
+# analysis has had to load a 16 MB sim_input.rds to find the other half. Joining it here costs one
+# read and makes the summary self-sufficient.
+#
+# It is done at this step, and not by having run_power_simulation.R emit a `dispersion` column,
+# because that would only help sweeps run AFTER the change -- an existing sweep's per-replicate
+# output is already written, and re-running it to add a per-gene constant would cost thousands of
+# CPU-hours. Summarising again from stored power tables costs seconds.
+#
+# `gene_mean` comes along because it is the mu in that formula and is NOT the same quantity as
+# `average_expression_all_cells`: they correlate at r = 0.9999 but differ by a scale factor (median
+# ratio 0.84 on day0), since one is size-factor normalised and the other is not. Adding only the
+# dispersion would leave the formula still needing the RDS, which is the problem this solves.
+#
+# Optional throughout: with no --sim-input the columns are simply absent, so nothing downstream
+# that predates them can break.
+if (!is.null(opts$sim_input)) {
+  sim <- readRDS(opts$sim_input)
+  rd <- sim$row_data
+  missing_cols <- setdiff(c("mean", "dispersion"), colnames(rd))
+  if (length(missing_cols) > 0) {
+    stop("--sim-input's row_data has no ", paste(missing_cols, collapse = ", "), " column(s). ",
+         "See lib/sim_input.R for the contract.", call. = FALSE)
+  }
+  gi <- match(out$response_id, rownames(rd))
+  n_missing <- sum(is.na(gi))
+  if (n_missing > 0) {
+    log_step("note: ", n_missing, " of ", nrow(out), " pair(s) have a gene absent from ",
+             "--sim-input; their gene_mean and dispersion are NA")
+  }
+  # `dispersion` is 1/theta, not theta -- built that way in lib/simulate.R and consumed as
+  # rnbinom(size = 1/dispersion). The name is kept identical to sim_input's so the two cannot be
+  # read as different quantities; the theory term is therefore `1/gene_mean + dispersion`.
+  out$gene_mean <- rd$mean[gi]
+  out$dispersion <- rd$dispersion[gi]
+  log_step("Joined per-gene mean and dispersion from ", opts$sim_input)
 }
 
 # Per-effect-size columns.

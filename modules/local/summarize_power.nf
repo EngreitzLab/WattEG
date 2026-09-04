@@ -15,7 +15,12 @@ process SUMMARIZE_POWER {
     publishDir "${params.outdir}/${meta.id}", mode: params.publish_mode
 
     input:
-    tuple val(meta), path(power_files, stageAs: 'power/*')
+    // One tuple, joined on meta upstream. Two separate input channels would be paired positionally
+    // and could match one sample's power tables to another sample's sim_input.
+    //
+    // sim_input is here so the summary can carry the gene's dispersion and normalised mean, sparing
+    // every covariate model a 16 MB RDS read for the other half of SE^2 ~ (1/n)(1/mu + 1/theta).
+    tuple val(meta), path(power_files, stageAs: 'power/*'), path(sim_input)
 
     output:
     tuple val(meta), path('power_summary.tsv'), emit: summary
@@ -29,6 +34,7 @@ process SUMMARIZE_POWER {
         Rscript ${projectDir}/src/summarize_power.R \\
             --power "\${power_list}" \\
             --power-threshold ${params.power_threshold} \\
+            --sim-input ${sim_input} \\
             --out power_summary.tsv
     """
 
