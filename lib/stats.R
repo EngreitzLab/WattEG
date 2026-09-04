@@ -43,3 +43,49 @@ effect_label <- function(effect_size) {
   }
   gsub(".", "_", formatted, fixed = TRUE)
 }
+
+#' Agreement between two minimum-detectable-effect-size vectors, on a shared effect-size grid.
+#'
+#' Used to ask whether a reduced sweep design reproduces the full design's MDES per pair, and --
+#' with the reference bootstrapped against itself -- how much agreement the reference's own noise
+#' allows in the first place. Both callers need the same rule, which is why it lives here rather
+#' than inside the comparison script.
+#'
+#' `NA` means "never reached the power threshold at any tested effect size", which is a real answer
+#' rather than missing data: two NAs agree, and an NA against a value disagrees. Treating NA as
+#' missing and dropping those pairs would silently score the designs on an easier subset -- the
+#' pairs that reached the threshold at all.
+#'
+#' `within1` allows a disagreement of one step ON THE GRID, not one unit of effect size, because the
+#' grid is uneven (0.25 to 0.5 is a bigger jump than 0.05 to 0.1). A pair whose true MDES sits near
+#' a grid boundary flips between neighbouring steps on noise alone, so exact agreement understates
+#' how well a design does; reporting both is what separates "wrong" from "one step out".
+#'
+#' @param fitted,reference MDES vectors of equal length, with values drawn from `grid` or NA
+#' @param grid the effect sizes, ascending
+compare_mdes <- function(fitted, reference, grid = c(0.05, 0.1, 0.15, 0.2, 0.25, 0.5)) {
+  if (length(fitted) != length(reference)) {
+    stop("fitted and reference must have the same length.", call. = FALSE)
+  }
+  n <- length(fitted)
+  if (n == 0) {
+    return(list(exact = NA_real_, within1 = NA_real_, n = 0L))
+  }
+
+  both_na <- is.na(fitted) & is.na(reference)
+  both_val <- !is.na(fitted) & !is.na(reference)
+
+  exact <- both_na
+  exact[both_val] <- fitted[both_val] == reference[both_val]
+
+  # Positions on the grid, so "one step" means one grid position rather than one unit.
+  fi <- match(fitted, grid)
+  ri <- match(reference, grid)
+  if (any(!is.na(fitted) & is.na(fi)) || any(!is.na(reference) & is.na(ri))) {
+    stop("MDES values must come from `grid` or be NA.", call. = FALSE)
+  }
+  within1 <- both_na
+  within1[both_val] <- abs(fi[both_val] - ri[both_val]) <= 1
+
+  list(exact = mean(exact), within1 = mean(within1), n = n)
+}

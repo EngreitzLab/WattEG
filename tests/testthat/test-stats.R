@@ -68,3 +68,54 @@ test_that("effect_label is distinct across a realistic sweep", {
   sweep <- c(0.05, 0.1, 0.15, 0.2, 0.25, 0.5)
   expect_equal(length(unique(vapply(sweep, effect_label, character(1)))), length(sweep))
 })
+
+# compare_mdes() scores whether a reduced sweep design reproduces the full design's minimum
+# detectable effect size. The NA handling is the part worth pinning: NA means "never reached the
+# power threshold at any tested effect size", which is an answer, not missing data.
+
+test_that("compare_mdes counts exact and within-one-grid-step agreement", {
+  grid <- c(0.05, 0.1, 0.15, 0.2, 0.25, 0.5)
+
+  # identical -> everything agrees
+  x <- c(0.05, 0.15, 0.5)
+  expect_equal(compare_mdes(x, x, grid)$exact, 1)
+  expect_equal(compare_mdes(x, x, grid)$within1, 1)
+
+  # one grid step out: 0.1 vs 0.15 are adjacent, so not exact but within one
+  res <- compare_mdes(c(0.1), c(0.15), grid)
+  expect_equal(res$exact, 0)
+  expect_equal(res$within1, 1)
+
+  # two steps out: 0.05 vs 0.15
+  res <- compare_mdes(c(0.05), c(0.15), grid)
+  expect_equal(res$within1, 0)
+
+  # "one step" is a GRID step, not one unit of effect size: 0.25 and 0.5 are adjacent on this grid
+  # despite being 0.25 apart, while 0.15 and 0.25 are two steps despite being 0.1 apart.
+  expect_equal(compare_mdes(c(0.25), c(0.5), grid)$within1, 1)
+  expect_equal(compare_mdes(c(0.15), c(0.25), grid)$within1, 0)
+})
+
+test_that("compare_mdes treats NA as an answer, not as missing data", {
+  grid <- c(0.05, 0.1, 0.15, 0.2, 0.25, 0.5)
+
+  # both never reach the threshold -> they agree
+  expect_equal(compare_mdes(NA_real_, NA_real_, grid)$exact, 1)
+  expect_equal(compare_mdes(NA_real_, NA_real_, grid)$within1, 1)
+
+  # one reaches it and the other does not -> disagreement, and not rescued by within1
+  expect_equal(compare_mdes(NA_real_, 0.5, grid)$exact, 0)
+  expect_equal(compare_mdes(NA_real_, 0.5, grid)$within1, 0)
+  expect_equal(compare_mdes(0.5, NA_real_, grid)$within1, 0)
+
+  # NA pairs are counted in the denominator: dropping them would score designs on the easier subset
+  # of pairs that reached the threshold at all.
+  res <- compare_mdes(c(0.1, NA, 0.2), c(0.1, 0.5, 0.2), grid)
+  expect_equal(res$n, 3L)
+  expect_equal(res$exact, 2 / 3)
+})
+
+test_that("compare_mdes rejects values that are not on the grid", {
+  expect_error(compare_mdes(0.07, 0.1, c(0.05, 0.1)), "must come from")
+  expect_error(compare_mdes(c(0.05, 0.1), 0.1, c(0.05, 0.1)), "same length")
+})
