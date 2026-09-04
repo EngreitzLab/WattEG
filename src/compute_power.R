@@ -118,14 +118,42 @@ paths <- trimws(strsplit(opts$simulations, ",", fixed = TRUE)[[1]])
 # re-aggregate an existing sweep (the reduced-design study does this hundreds of times) is a
 # 100 KB argument list for no benefit. Sorted, so the row order does not depend on readdir order.
 expanded <- unlist(lapply(paths, function(p) {
-  if (dir.exists(p)) sort(list.files(p, pattern = "[.]tsv([.]gz)?$", full.names = TRUE)) else p
+  if (dir.exists(p)) sort(list.files(p, pattern = "[.](parquet|tsv([.]gz)?)$", full.names = TRUE)) else p
 }), use.names = FALSE)
 if (length(expanded) == 0) {
   stop("--simulations matched no files: ", opts$simulations, call. = FALSE)
 }
 paths <- expanded
 required <- c("grna_target", "response_id", "p_value", "log_2_fold_change", "rep")
-sims <- do.call(rbind, lapply(paths, read_tsv_file, required_columns = required))
+
+# Parquet or TSV, decided per file by its extension. The pipeline now hands this the consolidated
+# Parquet -- one file instead of 1,000, and seconds instead of a minute of parsing -- but an older
+# sweep's per-split TSVs still work unchanged, which is what makes the reduced-design study
+# reproducible against sweeps that predate the change.
+read_one <- function(path) {
+  if (grepl("[.]parquet$", path)) {
+    if (!requireNamespace("nanoparquet", quietly = TRUE)) {
+      stop("Reading ", path, " needs the `nanoparquet` package; run inside the pixi environment.",
+           call. = FALSE)
+    }
+    df <- as.data.frame(nanoparquet::read_parquet(path))
+    missing_cols <- setdiff(required, colnames(df))
+    if (length(missing_cols) > 0) {
+      stop(path, " is missing required column(s): ", paste(missing_cols, collapse = ", "), ".",
+           call. = FALSE)
+    }
+    # Keys are stored as factors to keep the dictionary encoding stable; everything downstream
+    # pastes and compares them as text.
+    for (column in c("grna_target", "response_id")) {
+      if (is.factor(df[[column]])) df[[column]] <- as.character(df[[column]])
+    }
+    df
+  } else {
+    read_tsv_file(path, required_columns = required)
+  }
+}
+
+sims <- do.call(rbind, lapply(paths, read_one))
 log_step("Read ", nrow(sims), " replicate rows from ", length(paths), " file(s)")
 
 # Replicates with no fold change estimate carry no information about whether the association would

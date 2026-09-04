@@ -49,6 +49,17 @@ r-crayon = "*"        # console messages in check_functions, import_functs, s4_h
 r-parallelly = ">=1.47.0"
 r-withr = "*"
 
+# --- consolidating the per-replicate output into Parquet ---------------------------------
+# nanoparquet, NOT arrow. Both read and write Parquet; arrow pulls in 52 packages to do it --
+# the whole AWS C SDK, Azure storage, Google Cloud, gRPC, protobuf, OpenTelemetry, Thrift and ORC,
+# 2,041 lines of lockfile -- because it ships a cloud filesystem layer. This pipeline reads local
+# files. nanoparquet is a self-contained implementation with no dependencies of its own.
+#
+# What it gives up: Arrow datasets, partitioning and predicate pushdown. None are needed here --
+# consolidation writes one file per effect size, and a reader wants either all of it or a column
+# subset, both of which nanoparquet does.
+r-nanoparquet = "*"
+
 # --- reached by ondisc, for odm-backed (out-of-core) response matrices ------------------
 #
 # ondisc itself is installed from a pinned commit by `pixi run setup` (see ONDISC_SHA above), not

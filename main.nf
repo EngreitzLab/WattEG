@@ -28,6 +28,7 @@ include { SPLIT_PAIRS       } from './modules/local/split_pairs'
 include { FIT_NULL_MODELS   } from './modules/local/fit_null_models'
 include { MERGE_NULL_MODELS } from './modules/local/merge_null_models'
 include { POWER_SIMULATION  } from './modules/local/power_simulation'
+include { CONSOLIDATE_REPLICATES } from './modules/local/consolidate_replicates'
 include { COMPUTE_POWER     } from './modules/local/compute_power'
 include { SUMMARIZE_POWER   } from './modules/local/summarize_power'
 
@@ -192,7 +193,16 @@ workflow {
     // replicate count per pair, which a concatenation would hide.
     ch_by_es = POWER_SIMULATION.out.sim.groupTuple(by: [0, 1])
 
-    COMPUTE_POWER(ch_by_es, PREPARE_SIM_INPUT.out.threshold.first())
+    // ---- step 4b: one Parquet per effect size ----------------------------------------------
+    //
+    // The per-split TSVs are no longer published; this is. They cost 30-90 s of parsing per read
+    // as 1,000 gzipped files, and the per-replicate output is the one thing power can be
+    // re-derived from, so it is read repeatedly. The splits remain in the work directory, so a
+    // failed consolidation loses nothing.
+    CONSOLIDATE_REPLICATES(ch_by_es)
+
+    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet.map { meta, es, f -> [meta, es, [f]] },
+                  PREPARE_SIM_INPUT.out.threshold.first())
 
     // ---- step 6: one row per pair across every effect size ---------------------------------
     ch_all_power = COMPUTE_POWER.out.power

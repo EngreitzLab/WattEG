@@ -25,10 +25,13 @@ process POWER_SIMULATION {
     // per-replicate p-values, they let a run be compared split by split against the other runner,
     // and re-deriving one costs a full task. This is the bulky output -- ~1,000 files per effect
     // size, a few hundred MB in total.
-    // per_replicate, not sim: a row here is one (pair, replicate) test result, and "sim" said nothing
-// about that. This is the only output from which power can be RE-derived -- subsampling replicates
-// to study reduced designs, or bootstrapping -- so it is worth keeping and worth naming clearly.
-    publishDir "${params.outdir}/${meta.id}/per_replicate/es${effect_size}", mode: params.publish_mode
+    // NOT published. These per-split files are what makes the run resumable and preemption-tolerant --
+// 1,000 tasks write concurrently and no single-file format supports that -- but as a published
+// artefact they were 6,000 files costing 30-90 s of parsing per read. CONSOLIDATE_REPLICATES turns
+// each effect size into one Parquet file and publishes that instead.
+//
+// They survive in the work directory until Nextflow cleans it, so a failed consolidation cannot
+// lose data.
 
     input:
     tuple val(meta), path(sim_input), path(sceptre_template), path(grna_targets),

@@ -11,7 +11,17 @@
 # a profile were silently overridden by config/config.yml, and a "test" run quietly used production
 # values. Profiles select where a run executes; params files select what it runs.
 
-samplesheet: assets/samplesheet.csv
+# The SYNTHETIC object from src/make_test_data.R, not a lab dataset. The default samplesheet
+# pointed at results/day0_grna20_no_shuffle/sceptre_object.rds -- a path that only ever existed on
+# one machine, and which broke the moment those results were moved off it. A test configuration
+# should not depend on anyone's disk.
+#
+# Generate it first, which takes ~45 s and needs no lab data:
+#   sbatch workflow/slurm_executor/13_make_test_data.sbatch
+#
+# tests/data/ is gitignored -- the object is 648 KB against the pre-commit hook's 512 KB ceiling,
+# and regenerating it is the point of having a generator.
+samplesheet: assets/samplesheet_synthetic.csv
 outdir: results/nextflow_test
 
 effect_sizes:

@@ -15,6 +15,8 @@ process COMPUTE_POWER {
     publishDir "${params.outdir}/${meta.id}/power", mode: params.publish_mode
 
     input:
+    // One consolidated Parquet per effect size, from CONSOLIDATE_REPLICATES. Was 1,000 staged
+    // TSVs; the file list below is kept general so an older sweep's TSVs still work.
     tuple val(meta), val(effect_size), path(simulations, stageAs: 'sim/*')
     tuple val(meta2), path(threshold)
 
@@ -28,8 +30,8 @@ process COMPUTE_POWER {
     # Both forms matched: the per-replicate output is gzipped, but an older sweep being
     # re-aggregated is plain .tsv. Missing the .gz here would have found no files and produced an
     # empty power table rather than an error.
-    sim_list=\$(ls sim/*.tsv.gz sim/*.tsv 2>/dev/null | paste -sd, -)
-    echo "combining \$(ls sim/*.tsv.gz sim/*.tsv 2>/dev/null | wc -l) simulation file(s)"
+    sim_list=\$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null | paste -sd, -)
+    echo "combining \$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null | wc -l) file(s)"
 
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         Rscript ${projectDir}/src/compute_power.R \\
