@@ -95,6 +95,28 @@ nothing to transfer.
 
 ---
 
+## Steps 2-3 — DONE on day0, 2026-09-04
+
+Both passed, and better than this file assumed. Full numbers in `docs/status.md`; the headline is
+that the best three-point design reproduces the six-point MDES for **92.0 %** of pairs against a
+reference whose own bootstrapped self-agreement is **91.4 %** — so three well-placed effect sizes
+are a lower-variance estimator of the deliverable, not an approximation to it.
+
+Also settled here:
+
+- **A grid only has to be approximately right.** Placement costs up to 10 points of *exact* MDES
+  agreement, but every grid tested gives 98.7-98.8 % within one step, and every grid predicts 0.15
+  upward to within 0.054. Only the lowest effect size is sensitive.
+- **Extrapolating upward is free, downward is not.** 0.5 is predicted to 0.014-0.016 by every grid,
+  including one that never saw above 0.25. So a curve gives you any effect size at or above your
+  fitted range; small effect sizes must be measured.
+- **Cost: 45-70 % saved**, including a one-effect-size pilot to place the grid.
+
+Section 6 also moved, which was not planned as part of these steps: calibrated
+expression-conditional intervals certify **86-96 %** of what measurement certifies, at honest
+coverage. That makes prediction a per-pair method rather than an aggregate one, which is what the
+`trans` claim needs.
+
 ## Step 4 — transfer to Gasperini
 
 **The design.** Take parameters fitted on `wtc11`, predict power for Gasperini pairs, then compare

@@ -66,12 +66,15 @@ Panel (c) is the one that turns §5 from a reasoned recipe into a demonstrated o
 |---|---|---|---|
 | a | Fitted `k` vs predicted `k`, `sqrt(n)` exponent annotated (0.502 vs theory 0.500) | 6,030 `wtc11` pairs with a usable fit | ✅ |
 | b | Partial dependence on perturbed cells and on expression | same | ✅ |
-| c | Residuals by expression decile / dispersion / cell count — the non-randomness check | same | ✅ (not yet computed) |
-| d | Calibrated prediction intervals vs measured power, held out | same + a calibration split | ✅ (method not yet implemented) |
+| c | Residuals by expression decile / dispersion / cell count — the non-randomness check | same | ✅ **computed on day0**: width varies **8.61×** across expression deciles (1.16× across cell count), a clean inverted-U. Errors are concentrated, which is the case that harms a classifier |
+| d | Calibrated prediction intervals vs measured power, held out | same + a calibration split | ✅ **computed on day0**: expression-conditional 90 % intervals cover 89.4–91.3 % held out, and certify **86–96 %** of what measurement certifies. Global calibration covers on average but is wrong per stratum (99.7 % vs 79.8 %) |
 | e | Coefficients fitted per dataset, side by side — do they transfer? | needs ≥2 more sweeps | ❌ |
 
-Panel (e) is the paper's most important missing panel: §6 claims transfer, and only (e) tests it.
-Panel (c) matters for the scE2G/rE2G argument, because non-random error is what harms a classifier.
+Panel (e) tests cross-dataset transfer, which EM has since scoped as reviewer-facing rather than
+load-bearing: the goals are reducing computation and predicting `trans` and unmeasured pairs *within*
+a dataset. Panel (c) turned out to matter more than expected — the error is strongly non-random in
+expression, which is exactly what harms a classifier, and it is what forced the conditional
+calibration in (d).
 
 ---
 

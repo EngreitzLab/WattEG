@@ -1060,6 +1060,94 @@ The defensible per-pair version, if wanted, is to calibrate the residual quantil
 subset and widen each pair's effect-size interval by them. That gives honest intervals, merely wider
 than measured ones — and quantifies what a measured sweep is buying.
 
+#### Measured on day0, 2026-09-04: the reduced design, and calibrated intervals
+
+Everything below is on `day0` (34,886 pairs, six effect sizes, 100 replicates) and cost no new
+simulation — it is arithmetic over the stored per-replicate output.
+
+**THREE EFFECT SIZES BEAT SIX, ON THE DELIVERABLE.** Scoring each design's per-pair minimum
+detectable effect size against the full sweep, with the reference bootstrapped against itself to
+establish what its own noise allows:
+
+| Grid (100 reps) | held-out MAE (x noise floor) | MDES exact | +-1 step |
+|---|---:|---:|---:|
+| **0.1 / 0.2 / 0.25** | 0.0538 (2.83x) | **92.0 %** | 98.8 % |
+| 0.05 / 0.15 / 0.25 | 0.0358 (1.95x) | 88.5 % | 98.8 % |
+| 0.05 / 0.1 / 0.2 / 0.25 | 0.0280 (1.80x) | 87.2 % | 98.8 % |
+| 0.05 / 0.1 / 0.25 (`wtc11`'s best) | 0.0320 (1.94x) | 82.1 % | 98.7 % |
+| *reference's own ceiling* | — | *91.4 %* | *99.5 %* |
+
+The best design **exceeds the reference's self-agreement**. That is not the fit beating truth: the
+fitted curve pools 300 draws into one parameter, while the reference snaps its MDES from six
+individually noisy points. So three well-placed effect sizes are not an approximation to six — on
+the deliverable they are a lower-variance estimator.
+
+Three consequences worth carrying into the paper:
+
+- **MAE and MDES rank the grids in opposite order.** Tuning a design on interpolation error tunes
+  the wrong thing: `0.1/0.2/0.25` has the worst MAE and the best MDES, because it spends no points
+  in the saturated tails — which is exactly where MDES does not live.
+- **`wtc11`'s best grid loses on `day0`** (82.1 % against 92.0 %), confirming that grid placement is
+  dataset-specific. But the penalty is confined to *exact* agreement: every grid gives 98.7–98.8 %
+  within one step, and every grid predicts 0.15 upward to within 0.009–0.054. Only the lowest effect
+  size is sensitive to placement.
+- **Replicates degrade gently**: 92.0 / 87.5 / 83.1 / 78.7 % at 100 / 50 / 30 / 20, with a seed
+  spread of ±0.1 pt over three subsamples, so these are stable rather than lucky draws.
+
+Per-effect-size prediction error, which answers "can I get an effect size I never ran?":
+**extrapolating upward is safe and downward is not.** 0.5 is predicted to 0.014–0.016 by every grid
+including one that never saw above 0.25, because by then nearly every pair is saturated. 0.05 is
+the worst cell in the table (0.108 when extrapolated down to) and is poorly predicted even when
+*fitted* (0.057–0.079) — the one-parameter line failing at the low end.
+
+**COST.** A pilot of one effect size at 30 replicates locates the transition distribution (5 % of a
+sweep), then three points at 100 reps is 50 %, or at 50 reps 25 %. So **45–70 % saved**, and the
+grid only has to be approximately right.
+
+#### Calibrated prediction intervals: section 6 is usable after all
+
+`log(k) ~ log(pert_cells) + log(expression)` on `day0` gives `b = +0.5024` against a theoretical
+0.500 — the `sqrt(n)` law confirmed independently of `wtc11`'s 0.502 — with R² 0.909 and `k` within
+×1.258. The theoretically-derived form, `log(1/mu + 1/theta)` instead of a free power law in `mu`,
+fits better still: `b = +0.5030`, R² 0.939, `k` within ×1.206.
+
+But a point prediction carries ±0.157 in power at the median and ±0.30 at p90, which is not a
+per-pair claim. What makes it one is a calibrated interval, and **the calibration must be
+conditional on expression**:
+
+| effect size | coverage | median width | **certified by prediction** | certified by measurement |
+|---|---:|---:|---:|---:|
+| 0.15 | 90.1 % | 0.094 | **39.1 %** | 45.6 % |
+| 0.2 | 90.5 % | 0.045 | **58.9 %** | 63.0 % |
+| 0.25 | 91.3 % | 0.020 | **69.9 %** | 72.7 % |
+| 0.5 | 95.2 % | 0.000 | **88.1 %** | 91.3 % |
+
+**Prediction certifies 86–96 % of what measurement certifies**, at honest coverage, on pairs the
+calibration never saw. Global calibration gets the same average coverage but is wrong everywhere in
+particular — 99.7 % in the lowest expression stratum against 79.8 % in the middle — and its
+intervals are twice as wide. At effect size 0.5 global calibration certifies **0 %** where
+conditional certifies 88.1 %, so conditioning is not a refinement, it is what makes the method work.
+
+**Two traps recorded, because both produced plausible wrong answers:**
+
+- **Calibrate in power space, not in `k` space.** An interval on `k` claims to cover the true `k`;
+  a per-pair claim needs one that covers the measured *power*, and three errors sit between them —
+  model error in `k`, the curve's own misfit, and binomial noise. The `k`-space version gave 45 %
+  coverage against a nominal 90 %, and at saturated effect sizes produced intervals of width 0.000
+  that could not cover anything.
+- **The residual structure is not explained.** The interval width needed varies 8.61x across
+  expression deciles (1.16x across perturbed cells) as a clean inverted-U — `k` overpredicted ~1.39x
+  at both extremes, underpredicted ~1.14x in the middle. Three candidate causes were tested and all
+  three failed: the missing dispersion term (the theoretical form improved the average fit and left
+  the structure intact, 8.61x → 8.69x), poor underlying curve fits (`corr(deviance/df, |residual|)`
+  = −0.037), and a mismatched expression variable (r = 0.9999 between the two). It does not need
+  explaining for the intervals to be honest — they are calibrated empirically — but it is unexplained
+  and should not be presented as understood.
+
+Incidentally measured: **`deviance/df` rises monotonically with expression, 0.91 to 9.5.** The
+straight-line curve fails at the *high*-expression end specifically, not at both ends as previously
+recorded.
+
 #### What this needs before it can carry a paper
 
 This subsection was written as a caveat on a side result. It is no longer a side result: predicting

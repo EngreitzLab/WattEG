@@ -98,6 +98,22 @@ pixi_run Rscript src/fit_covariate_model.R \
     --out-summary "${OUT}/covariate_model.txt" \
     --out-residuals "${OUT}/covariate_residuals.tsv"
 
+## ---- calibrated prediction intervals, and whether they can certify anything ------------------
+#
+# The model predicts k to about x1.2, i.e. +-0.16 in power at the median -- too coarse for a
+# per-pair claim as a point estimate. So the question is whether an honest INTERVAL is narrow
+# enough to be worth anything, which is decided by coverage on pairs the calibration never saw and
+# by how many of them a prediction can certify against what measurement certifies.
+echo
+echo ">>> calibrating prediction intervals"
+pixi_run Rscript src/calibrate_prediction_intervals.R \
+    --curves "${SIX_POINT}" \
+    --reference "${REFERENCE}" \
+    --threshold-file "${THRESHOLD}" \
+    --sim-input "${SWEEP}/prepared/sim_input.rds" \
+    --out-summary "${OUT}/prediction_intervals.txt" \
+    --out-pairs "${OUT}/prediction_intervals_pairs.tsv"
+
 echo
 echo "Wrote ${OUT}/covariate_model.txt and covariate_residuals.tsv"
 echo
