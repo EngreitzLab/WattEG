@@ -96,10 +96,28 @@ RUN pixi install --frozen \
 # .pixi/rlibs are what the tasks use.
 RUN rm -rf /root/.cache/rattler /root/.cache/pixi /root/.pixi/cache
 
-# NOT pruned: .pixi/envs/build. It is a few GB and no task needs a compiler, so removing it is the
-# obvious size win -- but sceptre and ondisc were compiled against it and this image has not yet
-# been validated end to end, so correctness comes first. Prune it once a full run has passed, and
-# re-run `pixi run check-api` afterwards to prove the runtime environment still loads sceptre.
+# Prune the build environment. It carries the compilers, r-remotes and the packages R CMD INSTALL
+# demands from sceptre's DESCRIPTION -- all of which are needed to BUILD sceptre and ondisc and none
+# of which any task calls. Measured inside the unpruned image:
+#
+#   .pixi/envs/build     1.7 GB   <- removed here
+#   .pixi/envs/default   1.6 GB   the runtime environment, kept
+#   .pixi/rlibs          7.5 MB   the compiled sceptre and ondisc, kept
+#
+# That is roughly half the environment, and it matters more than a one-off download: every Batch
+# worker pulls this image, and with spot preemption (21 interruptions in a single 68-CPU-hour
+# validation run) it is pulled considerably more often than the task count suggests.
+#
+# Safe because the compiled packages live in .pixi/rlibs, not in the build environment, and both
+# environments resolve the same r-base from the same lockfile. That was verified before pruning:
+# the unpruned image loads sceptre 0.99.0, ondisc 1.3.5 and nanoparquet 0.5.1 from the DEFAULT
+# environment.
+RUN rm -rf /opt/pipeline/.pixi/envs/build
+
+# Prove the runtime environment still works AFTER the prune, not just before it. check-api runs in
+# the default environment and loads sceptre through its unexported slots, so it fails loudly if the
+# prune took something the runtime needed. Cheap insurance against shipping a broken image.
+RUN pixi run --frozen check-api
 
 ENV WATTEG_ROOT=/opt/pipeline
 
