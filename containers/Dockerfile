@@ -53,7 +53,18 @@
 #
 # With two stages the final image contains only what is COPYed, so anything the builder creates and
 # then removes cannot ship regardless of how the RUNs are arranged. That is a structural guarantee
-# rather than a discipline someone has to remember.
+# rather than a discipline someone has to remember, and it is what actually worked -- compressed
+# sizes read off the registry manifest:
+#
+#   single stage, no prune      7 layers   2.14 GiB
+#   single stage, prune in RUN  9 layers   2.14 GiB   <- no effect whatsoever
+#   two stages                  6 layers   0.68 GiB   <- 3.1x smaller
+#
+# The remaining 0.68 GiB is 629 MiB of /opt/pipeline, 33 MiB of pixi binary, and the 28 MiB ubuntu
+# base. The base is NOT worth optimising: debian:bookworm-slim measures 26.9 MiB against ubuntu's
+# 28.4 MiB, 1.5 MiB of 700, and swapping a validated base for 0.2% is a bad trade. Nothing here
+# needs a heavy R base image either -- conda-forge's r-base carries R's shared libraries inside the
+# environment, which is why stage 2 can be a bare ubuntu with only ca-certificates added.
 
 FROM ubuntu:22.04 AS builder
 
