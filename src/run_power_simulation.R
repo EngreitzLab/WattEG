@@ -108,9 +108,24 @@ opts <- parse_args(OptionParser(
 require_options(opts, c("sim_input", "sceptre_template", "pairs", "grna_targets",
                         "effect_size", "reps", "seed", "out"))
 
-if (opts$effect_size <= 0 || opts$effect_size >= 1) {
-  stop("--effect-size must be a fractional decrease strictly between 0 and 1 (got ",
-       opts$effect_size, ").", call. = FALSE)
+# ZERO IS ALLOWED, ON PURPOSE: it is the null arm.
+#
+# effect_size is a fractional decrease, so 0 means relative_expression = 1 -- simulate perturbed
+# cells from the UNPERTURBED mean and then run the screen's own test on them. Under that setup the
+# test is being asked about an effect that is not there, so its p-values should be uniform. That is
+# the only way to check calibration from this pipeline's own output, and without it nothing here
+# can distinguish "this pair has low power" from "this test is miscalibrated". A power sweep that
+# never runs the null is asserting its own type-I error rather than measuring it.
+#
+# Run it as its OWN sweep, not as a seventh point on a curve: compute_power's empirical power at
+# es = 0 is an estimate of alpha, which is meaningful on its own but would drag any curve fit or
+# MDES search that treated it as another effect size.
+#
+# The upper bound stays strict. effect_size = 1 means expression driven to zero, which is not a
+# knockdown this simulation models, and -log(1 - 1) is infinite anywhere a log effect is formed.
+if (opts$effect_size < 0 || opts$effect_size >= 1) {
+  stop("--effect-size must be a fractional decrease in [0, 1) (got ",
+       opts$effect_size, "); 0 is the null arm.", call. = FALSE)
 }
 if (opts$reps < 1) stop("--reps must be at least 1.", call. = FALSE)
 if (!is.null(opts$cell_batches) && is.null(opts$n_control_cells)) {
