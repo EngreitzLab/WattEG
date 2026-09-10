@@ -1,0 +1,2 @@
+sample,sceptre_object,response_odm
+moi5_trans_discovery,gs://hgrm-seqera/sceptre-nf-ondisc-test/moi5-trans-output/sceptre_object.rds,gs://hgrm-seqera/20260508-wtc11-sceptre/grna-single-target-moi5-ondisc/gene.odm
