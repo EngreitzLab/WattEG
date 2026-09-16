@@ -58,7 +58,7 @@ fi
 
 echo
 echo ">>> discovery p-value threshold"
-# The threshold decides which simulated replicates count as detections, so a mismatch against the
+# The threshold decides which simulated simulations count as detections, so a mismatch against the
 # old pipeline would shift every power estimate. The old code took max(p_value) over the
 # significant discoveries; the new code derives it from @discovery_result inside the object.
 # Cross-check the two here, in awk, so it costs nothing and needs no R.

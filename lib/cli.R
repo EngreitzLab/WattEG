@@ -164,7 +164,7 @@ derive_seed <- function(base_seed, target, rep, effect_size) {
   stable_hash(paste(base_seed, target, rep, effect_size, sep = "|"))
 }
 
-#' Stands in for `target` when seeding work that belongs to a replicate rather than to a target.
+#' Stands in for `target` when seeding work that belongs to a simulation rather than to a target.
 #'
 #' The null-model fits in fit_null_models.R are the case: a null simulation applies no knockdown, so
 #' its counts depend on neither the target nor the effect size, and seeding it from a real target's

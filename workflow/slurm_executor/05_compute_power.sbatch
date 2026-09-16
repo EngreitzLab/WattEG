@@ -10,17 +10,17 @@
 #SBATCH --error=logs/refactor/%x-%A.err
 #
 # 8 GB, not the 32 GB this asked for until 2026-08-14: measured 2.1 GB peak and 42 seconds over
-# 1,000 simulation files at 34,886 pairs x 100 replicates (job 38978285). The old figure was never
+# 1,000 simulation files at 34,886 pairs x 100 simulations (job 38978285). The old figure was never
 # measured and queued the job behind almost everything on a shared partition.
 #
-# Step 5 -- collapse the per-replicate simulation results into one power estimate per pair.
+# Step 5 -- collapse the per-simulation results into one power estimate per pair.
 #
 #   power = mean(p_value < threshold & log_2_fold_change < 0)
 #
 # reported with a Wilson score interval, one row per element-gene pair.
 #
-# Memory: compute_power.R rbinds every replicate row into one data frame. At ~35,000 pairs x 100
-# replicates that is ~3.5M rows, which fits comfortably in 32 GB but not in the 8 GB the
+# Memory: compute_power.R rbinds every simulation row into one data frame. At ~35,000 pairs x 100
+# simulations that is ~3.5M rows, which fits comfortably in 32 GB but not in the 8 GB the
 # simulation tasks use.
 #
 # Usage:  sbatch workflow/slurm_executor/05_compute_power.sbatch
@@ -69,12 +69,12 @@ for es in "${EFFECT_SIZES[@]}"; do
   echo
   echo "  wrote $(($(wc -l < "${out}") - 1)) pairs to ${out}"
 
-  # n_reps below NUM_REPLICATES means replicate rows were dropped for a missing p_value or fold
+  # n_reps below NUM_REPLICATES means simulation rows were dropped for a missing p_value or fold
   # change. A handful is unremarkable; a systematic shortfall is not.
   awk -F'\t' -v expected="${NUM_REPLICATES}" '
     NR == 1 { for (i = 1; i <= NF; i++) col[$i] = i; next }
     { n++; if ($col["n_reps"] + 0 < expected) short++ }
-    END { printf "  pairs with fewer than %d usable replicates: %d of %d\n", expected, short + 0, n }
+    END { printf "  pairs with fewer than %d usable simulations: %d of %d\n", expected, short + 0, n }
   ' "${out}"
 done
 

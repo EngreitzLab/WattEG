@@ -128,12 +128,12 @@ for (column in shared) {
 #
 # WHY HERE. The theory behind the power curve is SE^2 ~ (1/n_pert_cells) * (1/mu + 1/theta), so any
 # covariate model of power needs the gene's dispersion as well as its expression. Only
-# `average_expression_all_cells` reaches this table through the per-replicate output, so every such
+# `average_expression_all_cells` reaches this table through the per-simulation output, so every such
 # analysis has had to load a 16 MB sim_input.rds to find the other half. Joining it here costs one
 # read and makes the summary self-sufficient.
 #
 # It is done at this step, and not by having run_power_simulation.R emit a `dispersion` column,
-# because that would only help sweeps run AFTER the change -- an existing sweep's per-replicate
+# because that would only help sweeps run AFTER the change -- an existing sweep's per-simulation
 # output is already written, and re-running it to add a per-gene constant would cost thousands of
 # CPU-hours. Summarising again from stored power tables costs seconds.
 #
@@ -204,7 +204,7 @@ for (i in seq_along(tables)) {
 #
 # 1. THE SUFFIX RULE. A pair qualifies at effect size e only if it clears the threshold at e *and*
 #    at every larger effect size tested. Taking the first effect size that clears, in isolation,
-#    lets Monte-Carlo noise win: at 100 replicates a pair whose true power is 0.75 clears 0.8
+#    lets Monte-Carlo noise win: at 100 simulations a pair whose true power is 0.75 clears 0.8
 #    around a third of the time, so across six effect sizes a spurious early clear is likely, and
 #    the error is one-directional -- it always reports the pair as more detectable than it is.
 #    "Detectable from e upwards" is also the claim the column gets used to make.

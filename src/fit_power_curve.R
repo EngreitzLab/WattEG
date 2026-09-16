@@ -121,7 +121,7 @@ long <- do.call(rbind, lapply(tables, function(df) {
              effect_size = df$effect_size,
              # Successes rather than the proportion: compute_power.R reports power = successes /
              # n_reps, and n_reps can differ between effect sizes for the same pair when a
-             # replicate produced no fold-change estimate.
+             # simulation produced no fold-change estimate.
              successes = round(df$power * df$n_reps), n_reps = df$n_reps,
              stringsAsFactors = FALSE)
 }))

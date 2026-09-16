@@ -58,7 +58,7 @@ n_tasks=$(( array_end - array_start + 1 ))
 echo "step 4 -- power simulation"
 echo "  effect sizes:   ${EFFECT_SIZES[*]}${ONLY_ES:+  (submitting only ${ONLY_ES})}"
 echo "  splits:         ${N_SPLITS}"
-echo "  replicates:     ${NUM_REPLICATES}"
+echo "  simulations:     ${NUM_REPLICATES}"
 echo "  array:          ${array_start}-${array_end}  (${n_tasks} tasks)"
 echo "  partition:      ${PARTITION}"
 echo

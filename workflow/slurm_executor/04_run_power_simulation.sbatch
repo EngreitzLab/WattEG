@@ -74,7 +74,7 @@ require_file "${PREPARED_DIR}/sceptre_template.rds" "sceptre_template.rds from s
 require_file "${PREPARED_DIR}/grna_targets.tsv"     "grna_targets.tsv from step 01"
 require_dir_nonempty "${SPLITS_DIR}"                "splits directory from step 02"
 
-# The per-replicate null models (NULL_MODELS comes from config.sh -- do not redefine it here, or it
+# The per-simulation null models (NULL_MODELS comes from config.sh -- do not redefine it here, or it
 # will drift from the path step 02c writes). Without these, sceptre either refits inside every call
 # (4.3x) or -- if the template still carries the inherited real-data cache -- silently tests
 # simulated counts against real-data coefficients, which understates power. run_power_simulation.R
@@ -115,7 +115,7 @@ want_provenance="config=${NULL_MODEL_CONFIG} null_models_md5=${NULL_MODELS_MD5} 
 # "Complete" means both:
 #   * the right row count -- reps x pairs data rows plus a header. A task killed mid-write, or
 #     preempted on `owners`, leaves a short file, which is caught here rather than silently
-#     under-counting replicates in compute_power.R.
+#     under-counting simulations in compute_power.R.
 #   * matching provenance. An output produced under a different null-model configuration, a
 #     different null-model bundle, or different seed/reps is NOT resumable, and re-running it is
 #     the whole point of the resubmission. A missing sidecar means the file predates this check,

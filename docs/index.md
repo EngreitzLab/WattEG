@@ -19,7 +19,7 @@ dataset.
 
 ## How it works
 
-For each perturbation target, and for each replicate:
+For each perturbation target, and for each simulation:
 
 1. Draw per-gRNA effect sizes around the requested effect size, so guides targeting the same
    element differ in strength.
@@ -28,8 +28,8 @@ For each perturbation target, and for each replicate:
 3. Run sceptre's discovery analysis on the simulated data.
 4. Record whether the pair would have been called significant.
 
-Power is the fraction of replicates in which it would have been. Because that is a binomial
-proportion over a finite number of replicates, every estimate is reported with a
+Power is the fraction of simulations in which it would have been. Because that is a binomial
+proportion over a finite number of simulations, every estimate is reported with a
 [Wilson confidence interval]({{ site.baseurl }}{% link choosing-num-replicates.md %}).
 
 ## Quickstart

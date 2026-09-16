@@ -12,10 +12,10 @@
 # Step 10 -- validate the gRNA precomputation reuse: exact, and worth having.
 #
 # patches/0001-reuse-grna-precomputation.patch lets the pipeline fit the gRNA null model once per
-# target instead of once per (target, replicate). sceptre regresses perturbation status on the
+# target instead of once per (target, simulation). sceptre regresses perturbation status on the
 # covariates and draws its synthetic assignments from the fitted probabilities; both inputs are
-# fixed for the whole replicate loop and neither depends on the simulated counts, so every
-# replicate after the first was refitting an identical model.
+# fixed for the whole simulation loop and neither depends on the simulated counts, so every
+# simulation after the first was refitting an identical model.
 #
 # The claim is that reuse is *exact*, not approximate. This job tests it the only way that settles
 # it: run the same split twice under the same seed, once with reuse and once with
@@ -34,7 +34,7 @@
 _cmd="$(scontrol show job "${SLURM_JOB_ID:-0}" 2>/dev/null | sed -n 's/.*Command=\([^[:space:]]*\).*/\1/p' | head -1)"
 source "$(cd "$(dirname "${_cmd:-$0}")" && pwd)/config.sh"
 
-# One split at a handful of replicates. Replicates are what the reuse acts on -- it removes
+# One split at a handful of replicates. Simulations are what the reuse acts on -- it removes
 # (reps - 1) of every target's `reps` fits -- so the saving only becomes visible above 1, and 5 is
 # enough to see it without paying for 100.
 CHECK_REPS=5
@@ -122,7 +122,7 @@ echo
 echo ">>> cost"
 refit_s=$(cat "${CHECK_DIR}/refit.seconds")
 reuse_s=$(cat "${CHECK_DIR}/reuse.seconds")
-printf '    refit every replicate   %5ds\n' "${refit_s}"
+printf '    refit every simulation   %5ds\n' "${refit_s}"
 printf '    reuse per target        %5ds\n' "${reuse_s}"
 if [[ "${reuse_s}" -gt 0 ]]; then
   awk -v a="${refit_s}" -v b="${reuse_s}" 'BEGIN {
@@ -130,7 +130,7 @@ if [[ "${reuse_s}" -gt 0 ]]; then
   }'
 fi
 echo
-echo "    At ${CHECK_REPS} replicates the reuse removes $((CHECK_REPS - 1)) of every target'\''s ${CHECK_REPS} gRNA fits."
+echo "    At ${CHECK_REPS} simulations the reuse removes $((CHECK_REPS - 1)) of every target'\''s ${CHECK_REPS} gRNA fits."
 echo "    NUM_REPLICATES is ${NUM_REPLICATES} in production, so the fraction removed there is larger"
 echo "    ($((NUM_REPLICATES - 1))/${NUM_REPLICATES}); the saving per call is what this measures, and it does not grow."
 

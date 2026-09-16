@@ -191,13 +191,13 @@ if (!is.null(opts$null_precomputations)) {
   wanted <- as.character(opts$rep_offset + seq_len(opts$reps))
   absent <- setdiff(wanted, names(null_bundle$precomputations))
   if (length(absent) > 0) {
-    stop("--null-precomputations covers replicates ",
+    stop("--null-precomputations covers simulations ",
          paste(range(null_bundle$reps), collapse = "-"), " but this chunk needs ",
          paste(range(as.integer(wanted)), collapse = "-"), "; missing ", length(absent), ".",
          call. = FALSE)
   }
   null_precomp <- null_bundle$precomputations
-  log_step("Null models: ", length(null_precomp), " replicates from ",
+  log_step("Null models: ", length(null_precomp), " simulations from ",
            opts$null_precomputations)
   template@response_precomputations <- list()
 } else if (length(template@response_precomputations) > 0) {
@@ -353,7 +353,7 @@ for (target in targets) {
     sceptre_use <- target_template
     sceptre_use@response_matrix <- list(as_sceptre_response_matrix(counts, report_density = FALSE))
 
-    # This replicate's null models, fitted on a null simulation of the same replicate. Passing the
+    # This simulation's null models, fitted on a null simulation of the same replicate. Passing the
     # full set rather than this target's genes is deliberate: sceptre looks entries up by
     # response_id, so the extra ones are inert, and subsetting would cost a match() per rep for no
     # benefit. Left empty, sceptre refits each gene here instead.
@@ -412,7 +412,7 @@ if (result_idx == 0L) {
 combined <- do.call(rbind, results)
 
 # Keep only what a reader needs. sceptre's get_result() returns more than this, and at 100
-# replicates x 34,886 pairs x 6 effect sizes the extra columns were 39 % of a 3 GB output:
+# simulations x 34,886 pairs x 6 effect sizes the extra columns were 39 % of a 3 GB output:
 #
 #   fold_change                   2^log_2_fold_change -- the same number twice
 #   se_fold_change                read by nothing downstream
@@ -420,7 +420,7 @@ combined <- do.call(rbind, results)
 #                                 this pipeline tests against. compute_power.R recomputes it from
 #                                 p_value and log_2_fold_change, so keeping it invites the wrong
 #                                 column being believed
-#   average_expression_all_cells  a per-GENE constant repeated once per replicate; summarize_power.R
+#   average_expression_all_cells  a per-GENE constant repeated once per simulation; summarize_power.R
 #                                 now joins it from sim_input.rds, where it lives once
 #
 # Kept deliberately, despite also being constant per pair or per file:

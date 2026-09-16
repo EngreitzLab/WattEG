@@ -15,12 +15,12 @@
 # The faithful alternative -- refitting inside every call -- costs 4.3x, because each pair in a call
 # is a distinct gene and so the refit scales with pairs. This script buys the fidelity back. A gene's
 # null model is fitted on counts with *no knockdown anywhere*, which makes it independent of both the
-# target and the effect size, so one fit per (gene, replicate) serves every target the gene pairs
+# target and the effect size, so one fit per (gene, simulation) serves every target the gene pairs
 # with (~147 on average) and the whole effect-size sweep. That is why this is a separate step rather
 # than something run_power_simulation.R does inline: targets are spread over ~1,000 array tasks, and
 # fitting per task would pay for it ~1,000 times instead of once.
 #
-# Output is small. One entry is 11 named coefficients plus a theta scalar, so 100 replicates x ~272
+# Output is small. One entry is 11 named coefficients plus a theta scalar, so 100 simulations x ~272
 # genes is a few hundred KB.
 #
 # Usage:
@@ -64,13 +64,13 @@ option_list <- list(
   make_option("--grna-targets", type = "character", default = NULL, dest = "grna_targets",
               help = "grna_targets.tsv from prepare_sim_input.R."),
   make_option("--reps", type = "integer", default = NULL, dest = "reps",
-              help = "Number of replicates to fit. Must cover every rep the simulation will run."),
+              help = "Number of simulations to fit. Must cover every rep the simulation will run."),
   make_option("--rep-offset", type = "integer", default = 0L, dest = "rep_offset",
-              help = paste("Number of replicates already covered by an earlier chunk, matching",
+              help = paste("Number of simulations already covered by an earlier chunk, matching",
                            "run_power_simulation.R's --rep-offset [default %default].")),
   make_option("--seed", type = "integer", default = NULL, dest = "seed",
               help = paste("RNG seed. Must be the same --seed the simulation uses, or the null",
-                           "models will not correspond to the replicates they are used for.")),
+                           "models will not correspond to the simulations they are used for.")),
   make_option("--out", type = "character", default = NULL, dest = "out",
               help = "Output RDS: a list of @response_precomputations, named by replicate.")
 )
@@ -150,11 +150,11 @@ if (!setequal(gene_object$genes, genes)) {
 null_template <- template
 null_template@discovery_pairs_with_info <- representative
 
-log_step("Fitting ", length(genes), " null models x ", opts$reps, " replicates over ",
+log_step("Fitting ", length(genes), " null models x ", opts$reps, " simulations over ",
          n_cells, " cells")
 
-# No knockdown: relative expression is 1 everywhere. Built once -- it does not vary by replicate, and
-# at 237 x 586,309 doubles it is ~1.1 GB, so rebuilding it per replicate would be pure waste.
+# No knockdown: relative expression is 1 everywhere. Built once -- it does not vary by simulation, and
+# at 237 x 586,309 doubles it is ~1.1 GB, so rebuilding it per simulation would be pure waste.
 null_effect <- matrix(1, nrow = length(gene_object$genes), ncol = n_cells)
 
 precomputations <- vector("list", opts$reps)
@@ -164,8 +164,8 @@ for (rep_local in seq_len(opts$reps)) {
   rep_id <- opts$rep_offset + rep_local
   rep_started <- proc.time()[["elapsed"]]
 
-  # Seeded from the replicate alone -- deliberately not from (target, rep, effect_size) like the
-  # simulation, because the whole point is that a null fit belongs to a replicate and not to any
+  # Seeded from the simulation alone -- deliberately not from (target, rep, effect_size) like the
+  # simulation, because the whole point is that a null fit belongs to a simulation and not to any
   # target or effect size. NULL_FIT_TARGET_KEY keeps this stream disjoint from every target's stream.
   set.seed(derive_seed(opts$seed, NULL_FIT_TARGET_KEY, rep_id, 0))
 
@@ -187,7 +187,7 @@ for (rep_local in seq_len(opts$reps)) {
   fitted <- obj@response_precomputations
   missing_genes <- setdiff(genes, names(fitted))
   if (length(missing_genes) > 0) {
-    stop("Replicate ", rep_id, ": no null model was produced for ", length(missing_genes),
+    stop("Simulation ", rep_id, ": no null model was produced for ", length(missing_genes),
          " gene(s), including: ", paste(utils::head(missing_genes, 5), collapse = ", "),
          ". A gene without one would silently fall back to being refitted per call.",
          call. = FALSE)
@@ -195,7 +195,7 @@ for (rep_local in seq_len(opts$reps)) {
 
   precomputations[[rep_local]] <- fitted
   rep_ids[rep_local] <- rep_id
-  log_resources(paste0("replicate ", rep_id, " (", length(fitted), " genes)"), rep_started)
+  log_resources(paste0("simulation ", rep_id, " (", length(fitted), " genes)"), rep_started)
 
   rm(counts, obj, fitted)
 }
@@ -205,7 +205,7 @@ names(precomputations) <- as.character(rep_ids)
 ## WRITE ===========================================================================================
 
 # Recorded alongside the fits so run_power_simulation.R can refuse a mismatched file rather than
-# testing against null models fitted for different replicates or a different dataset.
+# testing against null models fitted for different simulations or a different dataset.
 out <- list(
   precomputations = precomputations,
   seed = opts$seed,
@@ -214,6 +214,6 @@ out <- list(
   n_cells = n_cells
 )
 saveRDS(out, opts$out)
-log_step("Wrote ", opts$out, " (", length(precomputations), " replicates x ", length(genes),
+log_step("Wrote ", opts$out, " (", length(precomputations), " simulations x ", length(genes),
          " genes)")
 log_resources("total", total_started)

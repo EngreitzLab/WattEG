@@ -1,11 +1,11 @@
 #!/usr/bin/env Rscript
 # Merge per-chunk null-model bundles from fit_null_models.R into one file.
 #
-# Fitting all replicates in one process takes ~20 minutes per replicate, so ~33 hours for 100. The
-# fits are independent, so the work is run as an array over replicate chunks and merged here.
+# Fitting all simulations in one process takes ~20 minutes per simulation, so ~33 hours for 100. The
+# fits are independent, so the work is run as an array over simulation chunks and merged here.
 #
 # The merge is where the invariants get checked, because a silently wrong bundle is worse than a
-# missing one: run_power_simulation.R looks each replicate up by name, so a gap, a duplicate or a
+# missing one: run_power_simulation.R looks each simulation up by name, so a gap, a duplicate or a
 # gene set that differs between chunks would surface as some tasks refitting and others not --
 # exactly the inconsistency this whole mechanism exists to remove.
 #
@@ -44,8 +44,8 @@ option_list <- list(
               help = paste("Chunk files from fit_null_models.R: either a comma-separated list or a",
                            "single glob (quote it so the shell does not expand it).")),
   make_option("--reps", type = "integer", default = NULL, dest = "reps",
-              help = paste("Total replicates expected after merging. Required: it is the only way",
-                           "to notice that a chunk failed and its replicates are simply absent.")),
+              help = paste("Total simulations expected after merging. Required: it is the only way",
+                           "to notice that a chunk failed and its simulations are simply absent.")),
   make_option("--out", type = "character", default = NULL, dest = "out",
               help = "Output RDS, in the same shape a single fit_null_models.R run produces.")
 )
@@ -85,7 +85,7 @@ for (path in paths) {
     stop(path, " is not a bundle from fit_null_models.R.", call. = FALSE)
   }
 
-  # Every chunk must describe the same dataset and the same base seed, or the replicates are not
+  # Every chunk must describe the same dataset and the same base seed, or the simulations are not
   # comparable and the merged file would be a mixture of two experiments.
   if (is.null(seed)) {
     seed <- bundle$seed
@@ -109,13 +109,13 @@ for (path in paths) {
 
   duplicated_reps <- intersect(names(bundle$precomputations), names(precomputations))
   if (length(duplicated_reps) > 0) {
-    stop(path, " repeats replicate(s) already merged: ",
+    stop(path, " repeats simulation(s) already merged: ",
          paste(utils::head(duplicated_reps, 5), collapse = ", "),
          ". Overlapping --rep-offset ranges would silently keep only one of them.", call. = FALSE)
   }
 
   precomputations <- c(precomputations, bundle$precomputations)
-  log_step("  ", basename(path), ": replicates ",
+  log_step("  ", basename(path), ": simulations ",
            paste(range(as.integer(names(bundle$precomputations))), collapse = "-"))
 }
 
@@ -127,39 +127,39 @@ precomputations <- precomputations[as.character(rep_ids)]
 ## CHECK ===========================================================================================
 
 if (length(precomputations) != opts$reps) {
-  stop("Merged ", length(precomputations), " replicates but --reps says ", opts$reps,
+  stop("Merged ", length(precomputations), " simulations but --reps says ", opts$reps,
        ". A chunk is missing; re-run the failed array tasks rather than proceeding.", call. = FALSE)
 }
 expected <- seq_len(opts$reps)
 if (!identical(rep_ids, expected)) {
   gaps <- setdiff(expected, rep_ids)
-  stop("Merged replicates are not 1..", opts$reps, "; missing: ",
+  stop("Merged simulations are not 1..", opts$reps, "; missing: ",
        paste(utils::head(gaps, 10), collapse = ", "), call. = FALSE)
 }
 
 sizes <- vapply(precomputations, length, integer(1))
 if (any(sizes != length(genes))) {
   short <- names(sizes)[sizes != length(genes)]
-  stop("Replicate(s) ", paste(utils::head(short, 5), collapse = ", "), " hold ",
+  stop("Simulation(s) ", paste(utils::head(short, 5), collapse = ", "), " hold ",
        paste(utils::head(sizes[short], 5), collapse = "/"), " null models where ", length(genes),
        " were expected. A gene without one is silently refitted per call.", call. = FALSE)
 }
 
-# The fits must differ between replicates: each is fitted on its own null draw, so identical
-# coefficients would mean the replicate seed is not reaching the simulation.
+# The fits must differ between simulations: each is fitted on its own null draw, so identical
+# coefficients would mean the simulation seed is not reaching the simulation.
 if (length(precomputations) >= 2) {
   first_gene <- names(precomputations[[1]])[1]
   a <- precomputations[[1]][[first_gene]]$fitted_coefs
   b <- precomputations[[2]][[first_gene]]$fitted_coefs
   if (isTRUE(all.equal(a, b))) {
-    stop("Replicates 1 and 2 have identical coefficients for ", first_gene,
+    stop("Simulations 1 and 2 have identical coefficients for ", first_gene,
          ": the null simulation is not being redrawn per replicate.", call. = FALSE)
   }
-  log_step("Replicate 1 vs 2, ", first_gene, ": max |coef diff| = ",
+  log_step("Simulation 1 vs 2, ", first_gene, ": max |coef diff| = ",
            signif(max(abs(a - b)), 4))
 }
 
 saveRDS(list(precomputations = precomputations, seed = seed, reps = rep_ids,
              genes = genes, n_cells = n_cells), opts$out)
-log_step("Wrote ", opts$out, " (", length(precomputations), " replicates x ", length(genes),
+log_step("Wrote ", opts$out, " (", length(precomputations), " simulations x ", length(genes),
          " genes)")

@@ -9,11 +9,11 @@
 #SBATCH --output=logs/refactor/%x-%A.out
 #SBATCH --error=logs/refactor/%x-%A.err
 #
-# Step 2c -- merge the per-replicate null-model chunks from step 2b into one bundle.
+# Step 2c -- merge the per-simulation null-model chunks from step 2b into one bundle.
 #
-# Cheap: a bundle entry is 11 named coefficients plus a theta scalar, so 100 replicates x ~237 genes
+# Cheap: a bundle entry is 11 named coefficients plus a theta scalar, so 100 simulations x ~237 genes
 # is a few hundred KB. The work is in the checking, not the merging -- merge_null_models.R refuses a
-# set with a gap, a duplicate replicate, a mismatched seed or gene list, or coefficients that are
+# set with a gap, a duplicate simulation, a mismatched seed or gene list, or coefficients that are
 # identical between replicates.
 #
 # Usage:  sbatch workflow/slurm_executor/02c_merge_null_models.sbatch
@@ -30,7 +30,7 @@ require_dir_nonempty "${NULL_MODELS_DIR}" "null-model chunks from step 02b"
 n_chunks=$(find "${NULL_MODELS_DIR}" -name 'chunk_*.rds' | wc -l)
 n_expected=$(( (NUM_REPLICATES + REPS_PER_NULL_CHUNK - 1) / REPS_PER_NULL_CHUNK ))
 echo "  chunks found:    ${n_chunks} (expected ${n_expected})"
-echo "  replicates:      ${NUM_REPLICATES}"
+echo "  simulations:      ${NUM_REPLICATES}"
 echo "  output:          ${NULL_MODELS}"
 echo
 

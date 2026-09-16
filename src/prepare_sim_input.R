@@ -387,7 +387,7 @@ write_tsv_file(grna_targets, out_grna_targets)
 # predates this output.
 writeLines(format_analysis_mode(analysis_mode), out_analysis_mode)
 
-# The significance threshold that a simulated replicate has to beat, taken from the real discovery
+# The significance threshold that a simulated simulation has to beat, taken from the real discovery
 # results already inside the object. Written as a plain number so the downstream step does not have
 # to deserialise the sceptre object for it. If the object has no discovery result, the threshold has
 # to be supplied explicitly downstream via --alpha.

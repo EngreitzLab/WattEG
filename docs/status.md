@@ -11,7 +11,7 @@ State of the refactor, written so the work can be picked up by someone else.
 Sherlock as well as on a laptop. `workflow/slurm_executor/` holds one plain `sbatch` script per step
 — deliberately no orchestration layer, so a failure is attributable to the step rather than the
 runner. The full simulation array at effect size 0.15 ran on 2026-08-13 as job `38849611`, 1,000
-tasks at 100 replicates, 999 of them completing; it is the source of every measured number below.
+tasks at 100 simulations, 999 of them completing; it is the source of every measured number below.
 
 Since then, and **not yet reflected in the older sections of this document**, three things landed:
 `null_fit` is implemented (Step 6a, below), the sceptre pin moved to **0.99.0**, and sceptre now
@@ -59,7 +59,7 @@ lives on the **`legacy`** branch. Anything referring to `bin/` predates this.
 | Per-task RAM | 1,774 MB+ | ~250 MB | `object.size` / peak heap |
 | Dead code | — | **694 lines removed** | 6 files, none reachable |
 | Split imbalance | 1.18× | **1.000** | measured on 2,798 targets |
-| Reproducibility | none | seeded and layout-invariant | identical p-values across 1×4 vs 2×2 replicate chunks, and across split layouts. **On the same hardware** — see the note below |
+| Reproducibility | none | seeded and layout-invariant | identical p-values across 1×4 vs 2×2 simulation chunks, and across split layouts. **On the same hardware** — see the note below |
 | Environment | 273-line pinned linux-64 conda | 11 direct specs, 2 platforms | `pixi.lock` solves for `linux-64` + `osx-arm64` |
 
 ### Correctness fixes
@@ -82,7 +82,7 @@ lives on the **`legacy`** branch. Anything referring to `bin/` predates this.
 - **Control-cell sampling is not a usable speed lever.** It costs 21–60 % of power. Off by default.
   Table in [Methods]({{ site.baseurl }}{% link methods.md %}).
 - **The speedup from smaller matrices was ~7×, not the ~109× the size reduction suggested.**
-  Per-replicate cost is sub-linear in cell count; ~0.3s per replicate is fixed overhead.
+  Per-replicate cost is sub-linear in cell count; ~0.3s per simulation is fixed overhead.
 
 ### Infrastructure
 
@@ -112,10 +112,10 @@ Needed to size cluster runs. Measured, not estimated. The right-hand column is S
 | Perturbed cells per pair | median 396 (IQR 195–542, max 1,927) | |
 | Discovery p-value threshold | 7.71404 × 10⁻⁴ | |
 | One `run_discovery_analysis()` call | 3.4–4.8s | **~9.7s** |
-| Cost model, per (target, replicate) | — | **1.140s + 0.5561s × pairs** — fitted on the 999 real tasks of `38887744` (`null_fit` + gRNA reuse), and the number to use. Predicts 635 CPU-h against 634 measured. Superseded: 5.076s + 0.5923s × pairs (job `38849611`, before the gRNA reuse), 4.91s + 0.459s × pairs (36-target smoke test), 3.66s + 0.512s × pairs (3 profiled targets) |
-| Per-target setup, once | — | **2.8–3.0s** (0.03s per replicate at 100 reps) |
+| Cost model, per (target, simulation) | — | **1.140s + 0.5561s × pairs** — fitted on the 999 real tasks of `38887744` (`null_fit` + gRNA reuse), and the number to use. Predicts 635 CPU-h against 634 measured. Superseded: 5.076s + 0.5923s × pairs (job `38849611`, before the gRNA reuse), 4.91s + 0.459s × pairs (36-target smoke test), 3.66s + 0.512s × pairs (3 profiled targets) |
+| Per-target setup, once | — | **2.8–3.0s** (0.03s per simulation at 100 reps) |
 | Where a call spends its time | — | **`glm.fit` 59 %** total / 27 % self, `rnbinom` 7 % — measured *with* the inherited cache, so this is not the skipped per-gene null fit; see the null-model section |
-| **Total at 100 replicates** | ~295 CPU-h per effect size | **999 CPU-h `as_is`, 634 CPU-h `null_fit` + gRNA reuse** — both measured, not modelled (`sacct` over jobs `38849611` and `38887744`). **Use 634**; the rest of this table predates the gRNA reuse |
+| **Total at 100 simulations** | ~295 CPU-h per effect size | **999 CPU-h `as_is`, 634 CPU-h `null_fit` + gRNA reuse** — both measured, not modelled (`sacct` over jobs `38849611` and `38887744`). **Use 634**; the rest of this table predates the gRNA reuse |
 | Per-task wall clock, measured | — | `as_is`: median **57.2 min**, mean 60.0, p95 85.4, max **110.1**. `null_fit` + reuse: median **36 min**, max **61** (4 h requested → 2 h is ample) |
 | Peak RAM, simulation task | 1.5 GB → request 4 GB | **median 2.27 GB, max 3.27 GB over 1,000 tasks** (8 GB requested → 6 GB keeps 1.8× headroom) |
 | Peak RAM, `prepare_sim_input.R` | 7.7 GB → request 12 GB | 16 GB requested, ~70s |
@@ -133,14 +133,14 @@ run, the refactor is still ahead on both axes:
 | CPU-hours per effect size | 1,308 | **~814–858** |
 | Wall clock | **14.9 h** (Snakemake, throttled) | **~50 min** (unthrottled array) |
 
-Both ran 100 replicates on the same dataset, so this is like for like. The CPU win is 1.6×; the
+Both ran 100 simulations on the same dataset, so this is like for like. The CPU win is 1.6×; the
 wall-clock win is mostly the unthrottled array rather than the code.
 
 **48 % of the cost is the per-target term** — one `run_discovery_analysis()` call carries the full
 586,309-cell bookkeeping however few gene pairs ride along. Targets can only share a call when their
 gene sets are disjoint, which is Step 9 below. Consequences worth internalising before optimising:
 
-- Halving the *pairs* saves ~26 %, not 50 %. Halving the *replicates* saves exactly 50 %.
+- Halving the *pairs* saves ~26 %, not 50 %. Halving the *simulations* saves exactly 50 %.
 - Filtering pairs for a second pass is much dearer than it looks: the 4,322 pairs whose interval
   straddles power 0.8 (12.4 % of pairs) are spread across 1,820 of 3,026 targets, so a top-up run
   pays 60 % of the per-target overhead to redo 12 % of the pairs — 82 % of its cost is overhead.
@@ -152,7 +152,7 @@ gene sets are disjoint, which is Step 9 below. Consequences worth internalising 
 
 ## Settled — which per-gene null model does the simulation test against?
 
-**Verdict: fit the null model on a null simulation of each replicate and reuse it (`null_fit`).**
+**Verdict: fit the null model on a null simulation of each simulation and reuse it (`null_fit`).**
 Today's inherited-cache behaviour understates power, and the fix costs 1.7 %. Measured by job
 `38854980` and the threshold check `38861277`; the numbers are below.
 
@@ -181,14 +181,14 @@ Two measured facts follow:
 
 ### The three configurations, measured
 
-Job `38854980` ran all three on 3 targets × 5 replicates, rotating the order within each replicate so
+Job `38854980` ran all three on 3 targets × 5 simulations, rotating the order within each simulation so
 no configuration is always first:
 
 | | What it does | Cost model | CPU-h per effect size |
 |---|---|---|---:|
 | `as_is` | inherited real-data cache — today's behaviour | 5.85s + 0.839s × pairs | 1,305 |
 | `cleared` | refits inside every call, on that call's simulated counts — **the faithful reference** | 8.18s + 5.127s × pairs | 5,656 |
-| `null_fit` | fitted once per (gene, replicate) on a null simulation, then reused | 5.51s + 0.891s × pairs | **1,327** |
+| `null_fit` | fitted once per (gene, simulation) on a null simulation, then reused | 5.51s + 0.891s × pairs | **1,327** |
 
 `cleared` is **4.3×**, and the extra cost sits in the *per-pair* slope, not the intercept — each pair
 in a call is a distinct gene, so refitting scales with the genes tested. It is a reference, never a
@@ -197,7 +197,7 @@ production candidate. `null_fit` buys its fidelity for **+1.7 % over `as_is`**.
 Treat the *ratios* as sound and the absolute CPU-hours as indicative only: this job timed `as_is` at
 11.5s on the 5-pair target where the profiling run measured 6.15s, so its clock runs ~1.9× slow —
 probably because it holds three caches and a null simulation in memory at once. That is also why the
-1,305 CPU-h here disagrees with the ~858 in the table above. The 100-replicate array's own `sacct`
+1,305 CPU-h here disagrees with the ~858 in the table above. The 100-simulation array's own `sacct`
 record supersedes both.
 
 ### Why `as_is` is not good enough
@@ -209,7 +209,7 @@ cleared vs null_fit   n=265  max|diff|=0.012  median=1.2e-10  spearman=1.0000
 cleared vs as_is      n=265  max|diff|=0.08   median=4.6e-05  spearman=0.9990
 ```
 
-Power is not aggregate. It is the fraction of replicates with `p < 7.2629e-4`, so only crossings of
+Power is not aggregate. It is the fraction of simulations with `p < 7.2629e-4`, so only crossings of
 that threshold matter, and a median difference of 4.6e-05 is ~6 % of the threshold itself. Counting
 the calls instead of correlating the p-values (job `38861277`, `threshold_check.R`):
 
@@ -231,10 +231,10 @@ Caveat on the magnitude: 3 targets, 53 pairs, 5 replicates. The *direction* is s
 equivalence of `null_fit` is unambiguous; the 2.64 % figure is thin and should not be quoted as
 precise.
 
-**Superseded on the magnitude.** The full 100-replicate run under both configurations (see
+**Superseded on the magnitude.** The full 100-simulation run under both configurations (see
 Consequences below) puts the mean shift at **+0.0063**, not the ~0.026 this sample gave — the
-direction held, the size did not. The 2.64 % flip rate was measured on 5 replicates, where a single
-replicate crossing the threshold moves power by 0.2; at 100 replicates it is 0.8 percentage points
+direction held, the size did not. The 2.64 % flip rate was measured on 5 simulations, where a single
+simulation crossing the threshold moves power by 0.2; at 100 simulations it is 0.8 percentage points
 of pairs crossing the certification line.
 
 Note the coefficients themselves differ substantially — inherited theta median 20.0 against 18.8 from
@@ -244,7 +244,7 @@ conditional-resampling test is far more robust to the null model than the null m
 ### Consequences
 
 - **The effect size 0.15 array (`38849611`) ran `as_is`, and the bias has now been measured directly
-  rather than extrapolated.** Both configurations exist at 100 replicates over all 34,886 pairs
+  rather than extrapolated.** Both configurations exist at 100 simulations over all 34,886 pairs
   (`power_as_is/` and `power_null_fit/`), and they are exactly paired — same simulated counts, so
   every difference is the null model with zero Monte-Carlo noise between them.
 
@@ -255,7 +255,7 @@ conditional-resampling test is far more robust to the null model than the null m
   | Ambiguous | 4,382 (12.6 %) | 4,408 (12.6 %) |
   | Underpowered | 17,410 (49.9 %) | 17,104 (49.0 %) |
 
-  **The direction is confirmed and the magnitude is ~4× smaller than predicted.** `as_is` understates
+  **The direction holds and the magnitude is ~4× smaller than predicted.** `as_is` understates
   power: 11,649 pairs rise against 3,631 that fall, a 3.2:1 ratio that noise would not produce. But
   the shift is **+0.0063 mean, 0.0100 mean absolute**, against the ~0.03 this document extrapolated
   from 3 targets × 53 pairs × 5 replicates. That extrapolation was too thin, as it said at the time;
@@ -295,27 +295,27 @@ superseded by `cache_experiment.R` and should not be used.
 ## Step 6a — `null_fit`: implemented, running
 
 Not a one-line change, because the null fit has to be **shared across array tasks**. A gene's null
-model is target-independent, so one fit per (gene, replicate) serves every target — but targets are
+model is target-independent, so one fit per (gene, simulation) serves every target — but targets are
 spread over 1,000 splits, so fitting inside each task would pay for it 1,000 times instead of once.
 It is also **effect-size independent**: a null simulation has no knockdown, so one set of fits serves
-the whole sweep. 100 replicates, not 100 × 6.
+the whole sweep. 100 simulations, not 100 × 6.
 
 What shipped:
 
-1. **`src/fit_null_models.R`** — for each replicate, simulates a null matrix (no knockdown) and runs
+1. **`src/fit_null_models.R`** — for each simulation, simulates a null matrix (no knockdown) and runs
    one `run_discovery_analysis()` with `@response_precomputations` empty, keeping only the resulting
-   slot. An entry is 11 named coefficients plus a `theta` scalar, so 100 replicates × 272 genes is a
+   slot. An entry is 11 named coefficients plus a `theta` scalar, so 100 simulations × 272 genes is a
    few hundred KB. Seeded from `(seed, rep)` only — deliberately *not*
    `(seed, target, rep, effect_size)`, since the point is that it depends on neither target nor
    effect size.
-2. **`run_power_simulation.R --null-precomputations`** assigns that replicate's entry to
-   `@response_precomputations` inside the replicate loop (`line 317`), and validates that the bundle's
-   seed and replicate range match the run's.
+2. **`run_power_simulation.R --null-precomputations`** assigns that simulation's entry to
+   `@response_precomputations` inside the simulation loop (`line 317`), and validates that the bundle's
+   seed and simulation range match the run's.
 3. **The inherited slot is cleared in `slim_sceptre_object()`** (`lib/sceptre_io.R:199`), *after*
    `build_dispersion_vector` has read it (`prepare_sim_input.R:259`) — dispersions must keep coming
    from the real data, since they set the noise the simulation is meant to reproduce. Only the null
    model moves. Clearing is what makes an accidental `as_is` impossible to reintroduce.
-4. **Steps `02b` (array, one task per replicate), `02b_submit.sh` and `02c` (merge)** in
+4. **Steps `02b` (array, one task per simulation), `02b_submit.sh` and `02c` (merge)** in
    `workflow/slurm_executor/`, with `--null-precomputations` threaded through
    `04_run_power_simulation.sbatch`.
 
@@ -353,7 +353,7 @@ variable` under `set -u`, the bash 4.2 empty-array bug already fixed in `04_subm
 back-ported. That is why `null_models/` was empty.
 
 Keep the `as_is` output rather than deleting it — it is the only direct measurement of how much the
-bias moved real numbers at 100 replicates, and the threshold check that found the bias used 5.
+bias moved real numbers at 100 simulations, and the threshold check that found the bias used 5.
 
 ---
 
@@ -390,7 +390,7 @@ Verified not to be a problem: the one RNG change on the association path
 sceptre's CRT path regresses perturbation status on the covariates and draws synthetic treatment
 assignments from the fitted probabilities. That fit depends on the gRNA-to-cell assignments and the
 covariate matrix — **never on the response counts**. The simulation calls `run_discovery_analysis()`
-once per (target, replicate) with only `@response_matrix` changing, so every replicate after the
+once per (target, simulation) with only `@response_matrix` changing, so every simulation after the
 first refit an identical model.
 
 Unlike `@response_precomputations` there is no slot to hand it back through: `fitted_probabilities`
@@ -410,7 +410,7 @@ Three design points are load-bearing — do not "simplify" them away:
   cannot tell a cache built for one path from a cache built for the other.
 - **Never cache `crt_index_sampler_fast()`'s output.** The fitted probabilities are deterministic;
   the synthetic index sets drawn from them must be redrawn every call. Caching the indices would
-  freeze the resampling distribution across replicates and destroy the CRT null — producing a power
+  freeze the resampling distribution across simulations and destroy the CRT null — producing a power
   estimate that is garbage but looks plausible.
 
 A target that is rank deficient *within its own cells* is omitted from the cache with a warning:
@@ -428,7 +428,7 @@ separately, because an unapplied patch would otherwise surface only at the first
 ### Equivalence check `10_grna_precomp_equivalence` — does the patch change results? No. And the saving is small.
 
 Job `38879261`: outputs **byte-identical** between reuse and refit. That was the point of the job and
-it is confirmed.
+it is settled.
 
 The cost result is weak, and much weaker than the retracted reasoning implied:
 
@@ -438,7 +438,7 @@ reuse per target        608s   (121.6s per call)
 speedup                 1.02x  (-1.9% wall clock)
 ```
 
-`split_0001` is 1 target with 36 pairs, so 5 replicates = 5 calls and reuse removes 4 of 5 gRNA fits:
+`split_0001` is 1 target with 36 pairs, so 5 simulations = 5 calls and reuse removes 4 of 5 gRNA fits:
 12s / 4 ⇒ ~3s per gRNA fit. Two caveats pointing opposite ways: 1.9 % on 620s is **within plausible
 node-to-node variation**, so 3s is an upper bound from a noisy difference, not a measurement — and
 this is the **least favourable target in the dataset**, since 36 pairs is the maximum against a
@@ -501,7 +501,7 @@ Recorded because each cost real time and none is discoverable from the code.
   requires it to match, so an output produced differently is redone rather than trusted. A missing
   sidecar means the file predates the check and cannot be vouched for, so it is also redone.
   Resubmitted as `38887744`.
-- **Step `03`'s replicate-count check compared against stale output.** It failed with "971 rows, 376
+- **Step `03`'s simulation-count check compared against stale output.** It failed with "971 rows, 376
   pairs, 109 with != 2 reps" while the three files the run actually wrote were each exactly 36 pairs
   × 2 reps. The directory held output from an earlier 280-split run, and because `split_pairs.R` pads
   the index to the width of `--n-splits`, those files are named `smoke_split_001_*` against
@@ -547,7 +547,7 @@ samplesheet -> PREPARE_SIM_INPUT ---+-> SPLIT_PAIRS -----------------+
 
 `FIT_NULL_MODELS` hangs off `PREPARE_SIM_INPUT` rather than off `SPLIT_PAIRS` because a gene's null
 model is fitted on a null simulation and so depends on neither the target nor the effect size. One
-set of fits serves every split and every effect size in a sweep — 100 replicates, not 100 × splits ×
+set of fits serves every split and every effect size in a sweep — 100 simulations, not 100 × splits ×
 effect sizes. Making it a sibling rather than a descendant is what expresses that.
 
 #### The design question that had to be settled first
@@ -566,7 +566,7 @@ Every process invocation is built on that pair.
 #### Validated at production scale
 
 **The Nextflow runner reproduces the sbatch runner exactly, on a full 1,000-split run.** Job
-`38978285`, 2h19m wall clock, all seven processes, 34,886 pairs at 100 replicates:
+`38978285`, 2h19m wall clock, all seven processes, 34,886 pairs at 100 simulations:
 
 | | |
 |---|---:|
@@ -575,7 +575,7 @@ Every process invocation is built on that pair.
 | Pairs whose **certification** flips | **0** |
 
 That is the check that decides whether the two runners can be considered equivalent, and it passes
-on the deliverable rather than on an intermediate. Note the per-replicate p-values do still differ
+on the deliverable rather than on an intermediate. Note the per-simulation p-values do still differ
 in the far tail between the two runs — see "Reproducibility is bitwise on one node" — but not one of
 those differences reaches the power estimate.
 
@@ -612,7 +612,7 @@ Recorded because every one cost time and none is guessable from the error text.
    when you build the channel rather than trimming it afterwards where you can.
 3. **`-profile test` was silently doing almost nothing.** Nextflow gives `-params-file` precedence
    over profile params, and the driver always passes one, so every test override sharing a name with
-   a production parameter was discarded — the run used 2 null chunks of 1 replicate where the
+   a production parameter was discarded — the run used 2 null chunks of 1 simulation where the
    profile asked for 1 of 2, and `num_replicates` stayed at 100. A "test" run would have been a
    full-size run. Test settings now live in `config/test.yml`, selected with `PARAMS_FILE`.
    **Profiles choose where a run executes; params files choose what it runs.**
@@ -675,7 +675,7 @@ discovery analysis and the wrong one for a power simulation. Evaluated against a
 - **It requires ondisc matrices.** Every script calls
   `read_ondisc_backed_sceptre_object(sceptre_object_fp, response_odm_fp, grna_odm_fp)`, with no
   in-memory path. Using it would mean serialising each simulated matrix to ODM.
-- **The simulation needs one object per gene-disjoint batch, not one per replicate** — the same
+- **The simulation needs one object per gene-disjoint batch, not one per simulation** — the same
   constraint as Step 9, since a gene is paired with ~147 targets. That is 100 × 300 = 30,000 objects
   for one effect size, each needing its own ODM.
 - **It re-runs everything upstream per object.** The workflow is `set_analysis_parameters ->
@@ -702,7 +702,7 @@ splits, at the same seed. Two of the three splits came out **byte-identical**. T
 | `fold_change` differing | 7, max relative **1.2 × 10⁻¹⁵** (~5 ulps) |
 | `p_value` differing by >10⁻⁶ relative | **4**, all at p < 10⁻²⁵ |
 | Largest single difference | 2.1 × 10⁻⁸¹ against 9.2 × 10⁻⁸⁰ |
-| **Replicates changing significance** | **0** |
+| **Simulations changing significance** | **0** |
 
 This is not a different RNG stream — that would perturb every row, not four of seventy-two. It is
 last-bit floating-point difference between CPU generations (this cluster spans six; see the node
@@ -722,7 +722,7 @@ pipeline has.
 
 ### Step 8 — tests and comparisons
 
-1. ~~**Unit tests**~~ — **done**: 62 tests in `tests/testthat/`, run with `pixi run test` or
+1. ~~**Unit tests**~~ — **done**: 96 tests in `tests/testthat/`, run with `pixi run test` or
    `sbatch workflow/slurm_executor/12_unit_tests.sbatch` (R does not belong on a login node). They
    cover the pure functions only — no sceptre, no lab data, no cluster — and every one of them
    corresponds to an entry under "Correctness fixes" above:
@@ -731,7 +731,7 @@ pipeline has.
    |---|---|
    | `test-stats.R` | `wilson_interval` against published values and at both boundaries, where the normal approximation collapses; `effect_label` pinning the `0.2 → "2"` bug |
    | `test-simulate.R` | `center_effect_size_matrix` putting each gene's perturbed mean on its target; `create_effect_size_matrix` orientation and clamping; `build_dispersion_vector` erroring rather than recycling |
-   | `test-seeding.R` | `derive_seed` separating every key component, and being invariant to how replicates are chunked — the property that makes `--n-splits` a purely computational knob |
+   | `test-seeding.R` | `derive_seed` separating every key component, and being invariant to how simulations are chunked — the property that makes `--n-splits` a purely computational knob |
 
    Two of these tests failed on first run **because the tests were wrong, not the code**: the
    effect-size matrix is genes × cells, not cells × genes (`run_power_simulation.R:314` reorders
@@ -772,7 +772,7 @@ pipeline has.
    and since it ships raw matrices rather than a `sceptre_object`, the API calls above would still
    have to be made by hand. Reasonable, but it removes less than it adds.
 3. ~~**Old-vs-new comparison**~~ — **done and passed**, job `38916341`; see Comparison 1 below.
-4. **Two-stage replicate allocation** — documented in
+4. **Two-stage simulation allocation** — documented in
    [Choosing num_replicates]({{ site.baseurl }}{% link choosing-num-replicates.md %}) but not
    orchestrated. The scripts already support it through `--rep-offset`.
 
@@ -809,12 +809,12 @@ CPU-hours per effect size. Costed below because the reasoning is easy to get wro
 directions.
 
 **Where the cost is.** The unit of work is one `run_discovery_analysis()` call per (target,
-replicate) — 3,026 × 100 = **302,600 calls per effect size** — and each one carries the full
+simulation) — 3,026 × 100 = **302,600 calls per effect size** — and each one carries the full
 586,309-cell setup regardless of how few gene pairs it covers. That per-call term is 4.91s of the
 `4.91s + 0.459s × pairs` model, so it is 413 of the 858 CPU-hours: **half the bill is setup paid
 and over**.
 
-**Why the obvious fix does not work.** The tempting version is one simulated object per replicate
+**Why the obvious fix does not work.** The tempting version is one simulated object per simulation
 covering all 34,886 pairs, so the setup is paid 100 times instead of 302,600. It is not valid. Each
 gene is paired with **147 targets on average, up to 299** — only 10 of 237 genes belong to a single
 target — and pair (A, g) needs gene g knocked down in A's perturbed cells while pair (B, g) needs it
@@ -844,7 +844,7 @@ every target it pairs with, so the total `rnbinom` volume is unchanged. This is 
 
 **`parallel = TRUE` is a different question and probably not the lever.** sceptre's internal
 parallelism forks across pairs within a call; the array fan-out already provides that parallelism
-across nodes, without fork overhead and without pinning a replicate to one node's cores. It does not
+across nodes, without fork overhead and without pinning a simulation to one node's cores. It does not
 reduce the number of calls, which is where the waste is. Batching and who-schedules-the-parallelism
 are orthogonal.
 
@@ -852,7 +852,7 @@ are orthogonal.
 
 1. **Settled by the array: the per-call overhead is 427 CPU-h and Step 9's ceiling is 1.63×.**
    Fitting `time = reps × (a × targets + b × pairs)` over all 999 completed tasks gives
-   **5.076s + 0.5923s × pairs** per (target, replicate) — 1,001 CPU-h predicted against 999 measured,
+   **5.076s + 0.5923s × pairs** per (target, simulation) — 1,001 CPU-h predicted against 999 measured,
    so the model is sound. The per-target term is **427 CPU-h, 42.6 % of the bill**.
 
    Batching 302,600 calls into ~30,000 leaves ~42 CPU-h of overhead, so
@@ -953,7 +953,7 @@ compute nodes are offline, run `setup` on a login node first.
 
 ### Smoke test before committing CPU-days
 
-Three targets, 2 replicates — should finish in a couple of minutes and proves the environment works.
+Three targets, 2 simulations — should finish in a couple of minutes and proves the environment works.
 
 ```sh
 mkdir -p prepared splits sim
@@ -1028,7 +1028,7 @@ pixi run Rscript src/summarize_power.R \
     --power power_es0.15.tsv,power_es0.2.tsv --out power_summary.tsv
 ```
 
-Expect roughly an hour per array task at 10 targets × 100 replicates × 2 effect sizes. Time limit is
+Expect roughly an hour per array task at 10 targets × 100 simulations × 2 effect sizes. Time limit is
 set to 3h for headroom — per-target cost varies about 1.5× with pair count.
 
 ### Comparison 1 — old vs new pipeline — **DONE, PASSED** (job `38916341`, 2026-08-13)
@@ -1054,7 +1054,7 @@ RNG-independent, so a zero difference across all 34,886 pairs proves the two imp
 identical cells for identical pairs — the entire upstream path is bit-identical, and only the
 simulation's RNG stream differs. Checks 3–5 are then about Monte-Carlo agreement alone.
 
-Check 5's mean absolute difference of 0.0304 is not a discrepancy: at 100 replicates a single power
+Check 5's mean absolute difference of 0.0304 is not a discrepancy: at 100 simulations a single power
 estimate carries a standard error up to 0.05, and both sides carry one, so per-pair scatter of this
 size is what agreement looks like. What would have been alarming is a *directional* offset, and
 check 4 finds none — 13,823 against 13,642 is as close to a coin flip as this many pairs allow.
@@ -1074,7 +1074,7 @@ Reports: `results/refactor/comparison/old_vs_as_is/` and `.../old_vs_null_fit/`.
 **Why it was outstanding:** the upstream statistics are proven bit-identical (size factors, normalised
 means, raw means: max absolute difference exactly 0), and dropping `@grna_matrix` was proven to leave
 discovery results unchanged. What has *not* been checked is the simulation itself, because seeding
-moved inside the replicate loop, which changes the RNG stream. So the comparison has to be
+moved inside the simulation loop, which changes the RNG stream. So the comparison has to be
 distributional rather than exact.
 
 The old code needs the old environment, which is why the cluster is the right place: the old
@@ -1121,21 +1121,21 @@ Then compare against the new `power_es0.15.tsv`. Suggested acceptance criteria:
 |---|---|
 | Pairs present | identical set |
 | Per-pair power difference | centred on 0; no systematic offset (paired sign test not significant) |
-| Mean power | agrees within the Monte-Carlo error of the replicate count used |
-| Correlation of per-pair power | high (> 0.95 at 100 replicates) |
+| Mean power | agrees within the Monte-Carlo error of the simulation count used |
+| Correlation of per-pair power | high (> 0.95 at 100 simulations) |
 
 A systematic offset in either direction is a real discrepancy and worth chasing. Scatter across
-individual pairs is expected — at 100 replicates the standard error of a single estimate is up to
+individual pairs is expected — at 100 simulations the standard error of a single estimate is up to
 0.05, so differences of ±0.1 on individual pairs are normal.
 
 Use the same `--reps` in both, and note the old pipeline cannot be seeded, so it produces a different
 draw every run. Running it two or three times gives a sense of its own run-to-run spread, which is
 the yardstick for judging the old-vs-new difference.
 
-### Comparison 2 — monotonicity at full replicate count
+### Comparison 2 — monotonicity at full simulation count
 
 **DONE, PASSED** on `day0`, 2026-09-03. Power must not decrease as effect size increases, and a
-violation that survives at full replicate count is a bug.
+violation that survives at full simulation count is a bug.
 
 | | |
 |---|---:|
@@ -1145,7 +1145,7 @@ violation that survives at full replicate count is a bug.
 | Largest decrease | **0.070** |
 | Pairs with `n_reps` ≠ 100 | **0** |
 
-Nothing survives as a bug. At 100 replicates the standard error of a power estimate near 0.5 is
+Nothing survives as a bug. At 100 simulations the standard error of a power estimate near 0.5 is
 0.05, so a *difference* of two estimates carries an SE around 0.07 — and the largest decrease
 observed is exactly 0.070, one standard error. Every violation is inside Monte-Carlo noise.
 
@@ -1154,7 +1154,7 @@ concerning: `day0` is the less-powered dataset, so more of its pairs sit in the 
 curve where adjacent effect sizes are close together and noise can invert them. Worth stating in
 the paper rather than leaving for a reviewer to ask about.
 
-The earlier evidence, kept because it is what motivated running this: at 12 replicates on 33 pairs
+The earlier evidence, kept because it is what motivated running this: at 12 simulations on 33 pairs
 it held (mean power 0.356 → 0.604 → 0.838 for 0.15 / 0.25 / 0.5) with one violation of 0.08 that a
 two-proportion test could not distinguish from noise.
 
@@ -1162,7 +1162,7 @@ two-proportion test could not distinguish from noise.
 
 Run with `--with-report`-style accounting (or just `sacct`) and record actual per-task wall time and
 `MaxRSS`, so the resource requests above can be tightened. The 4 GB figure comes from a laptop run of
-three targets; confirm it holds for splits containing the largest targets (up to 36 pairs).
+three targets; check it holds for splits containing the largest targets (up to 36 pairs).
 
 ---
 
@@ -1179,7 +1179,7 @@ Recorded so they are not relitigated:
 | `n_control_cells` off by default | measured 21–60 % power loss |
 | Threshold derived from `@discovery_result`, not `alpha` | reflects the correction actually applied |
 | Wilson intervals reported per pair | the normal approximation gives `[0, 0]` for zero successes |
-| Prefer more `n_splits` over more `reps_per_chunk` | chunking replicates re-pays the per-target setup |
+| Prefer more `n_splits` over more `reps_per_chunk` | chunking simulations re-pays the per-target setup |
 | local + slurm profiles only | no cloud executor needed |
 
 ## The analysis question this is all for
@@ -1194,14 +1194,14 @@ per-effect-size power columns.
 
 ## Open questions
 
-- **Two-stage replicate allocation**: worth wiring in? Costed properly it is ~1,768 CPU-h per effect
+- **Two-stage simulation allocation**: worth wiring in? Costed properly it is ~1,768 CPU-h per effect
   size against 3,430 for a uniform 400 and 858 for a uniform 100 — a 1.9× saving over uniform 400,
-  not the 3.7× an earlier version of this document claimed. That claim came from counting replicate
+  not the 3.7× an earlier version of this document claimed. That claim came from counting simulation
   equivalents, which ignores the per-target term; see
   [Choosing num_replicates]({{ site.baseurl }}{% link choosing-num-replicates.md %}). It only pays
   off if per-pair cutoff decisions are being made — which, per the section above, they are.
-- **Is the 5 % effect size worth 100 replicates?** Nearly every pair is underpowered there, so the
-  replicates buy a precise estimate of a number that is 0. Sweeping 5 % at 30 reps and spending
+- **Is the 5 % effect size worth 100 simulations?** Nearly every pair is underpowered there, so the
+  simulations buy a precise estimate of a number that is 0. Sweeping 5 % at 30 reps and spending
   the difference on 20–25 % would carry more information. Untested.
 - **`--target-overhead` in `split_pairs.R`: closed, and the answer is "leave it".** It defaults to 0,
   so every split is balanced on pair count alone. The `as_is` array fixed the right value at the time
@@ -1228,9 +1228,9 @@ per-effect-size power columns.
   spread on pair-only balancing. It is not that: the cost model predicts a 43–68 minute range, and
   regressing actual task time on predicted gives **r = 0.373, r² = 0.139** — split composition
   explains 14 % of the variance. The model is unbiased on the mean (36.02s predicted against 35.97s
-  actual per replicate), so it is not simply wrong. What explains the spread is **node
+  actual per simulation), so it is not simply wrong. What explains the spread is **node
   heterogeneity**: across the 229 nodes the array landed on, the slowest node's mean is **2.73×** the
-  fastest (55.8s against 20.5s per replicate). There was no preemption to blame (999 COMPLETED,
+  fastest (55.8s against 20.5s per simulation). There was no preemption to blame (999 COMPLETED,
   1 FAILED). Set `--target-overhead 8.6` if `N_SPLITS` ever drops far enough that splits hold ten or
   more targets; do not re-split an array for it.
 - **High MOI is a hard requirement, and now a measured one. Low MOI does not work.** Found by

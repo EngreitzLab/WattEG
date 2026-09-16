@@ -19,7 +19,7 @@ One row per element–gene pair, one set of columns per effect size.
 | `dispersion` | The gene's negative-binomial dispersion, **`1/theta`** rather than `theta` — the same convention `sim_input.rds` and `rnbinom(size = 1/dispersion)` use. Present only when `--sim-input` was supplied. |
 | `power_at_effect_size_15` | Power at a 15% knockdown. One column per effect size; the suffix is `effect_size × 100`, with any decimal point written as an underscore (0.125 → `power_at_effect_size_12_5`). |
 | `power_at_effect_size_15_ci_low`, `_ci_high` | 95% Wilson interval for that estimate. |
-| `power_at_effect_size_15_n_reps` | Replicates contributing to it. |
+| `power_at_effect_size_15_n_reps` | Simulations contributing to it. |
 | `min_detectable_effect_size` | Smallest **tested** effect size from which `power` reaches `--power-threshold` (default 0.8) and stays there. `NA` means no tested effect size did. |
 | `min_detectable_effect_size_ci_low` | Optimistic edge, from `power_ci_high`. |
 | `min_detectable_effect_size_ci_high` | **Conservative edge, from `power_ci_low` — the column to use when interpreting a negative.** |
@@ -40,7 +40,7 @@ own 95 % interval, so read it as a conservative-to-optimistic range rather than 
 interval for the effect size itself.
 
 **A pair must clear the threshold at its effect size and at every larger one tested.** Reporting the
-first effect size that clears, in isolation, lets Monte-Carlo noise decide: at 100 replicates a pair
+first effect size that clears, in isolation, lets Monte-Carlo noise decide: at 100 simulations a pair
 whose true power is 0.75 clears 0.8 about a third of the time, so across six effect sizes a spurious
 early clear is likely, and the error only ever runs one way — reporting the pair as more detectable
 than it is. Effect sizes a pair was not tested at count as unknown, not as failures, so they do not
@@ -61,7 +61,7 @@ reached this table and every such analysis had to load a 16 MB `sim_input.rds` t
 With the convention above, the bracket is `1/gene_mean + dispersion` — no conversion, because
 `dispersion` already *is* `1/theta`.
 
-They are joined by `summarize_power.R` at summary time rather than emitted per replicate, because
+They are joined by `summarize_power.R` at summary time rather than emitted per simulation, because
 they are per-gene constants: putting them in the simulation output would only help sweeps run after
 the change, while re-summarising an existing sweep from its stored power tables takes seconds. Both
 columns are absent if `--sim-input` is not passed, so older outputs and hand-run summaries are
@@ -79,7 +79,7 @@ seen one? Power is what separates those, but only if it is read the right way.
 The claim "this negative is biological" is a claim that power was **at least** 0.8, not that the
 point estimate landed above it. So threshold `power_ci_low` (or take
 `min_detectable_effect_size_ci_high`, which does it for you across effect sizes). That is a stricter
-test than it looks, and the strictness is the reason replicate count matters here more than anywhere
+test than it looks, and the strictness is the reason simulation count matters here more than anywhere
 else:
 
 | `num_replicates` | successes needed for `power_ci_low` ≥ 0.8 |
@@ -88,9 +88,9 @@ else:
 | 100 | 88/100 |
 | 400 | 336/400 |
 
-Measured on 34,886 pairs at effect size 0.15 and 100 replicates: 37.7 % of pairs are certified
+Measured on 34,886 pairs at effect size 0.15 and 100 simulations: 37.7 % of pairs are certified
 (`power_ci_low` ≥ 0.8), 12.4 % are ambiguous, and 49.9 % are clearly underpowered
-(`power_ci_high` < 0.8). That last half is not a precision problem — no number of replicates fixes
+(`power_ci_high` < 0.8). That last half is not a precision problem — no number of simulations fixes
 it; those pairs needed more perturbed cells or a larger effect.
 
 The sentence the table supports, per pair, is then:
@@ -131,16 +131,16 @@ The element-level statement that does hold up is a floor: **21.9 % of elements (
 no tested pair that could have reached power 0.8 at all**, and those elements cannot support a
 "regulates nothing" claim under any reading. In the other direction, only 5 of 3,026 elements have
 *every* tested pair certified, so element-wide negative claims are essentially never assertable at
-100 replicates and a 15 % knockdown. Worth knowing before building a figure around them.
+100 simulations and a 15 % knockdown. Worth knowing before building a figure around them.
 
 ## `power_es<effect_size>.tsv` — per effect size
 
 | Column | Meaning |
 |---|---|
 | `grna_target`, `response_id` | The pair. |
-| `power` | Fraction of replicates in which sceptre would have called the association. |
+| `power` | Fraction of simulations in which sceptre would have called the association. |
 | `power_ci_low`, `power_ci_high` | 95% Wilson score interval. |
-| `n_reps` | Replicates contributing. Can be below `--reps` if any replicate produced no fold-change estimate. |
+| `n_reps` | Simulations contributing. Can be below `--reps` if any simulation produced no fold-change estimate. |
 | `mean_log_2_fold_change` | Mean simulated log₂ fold change across replicates. |
 | `mean_pert_cells` | Mean perturbed cells. |
 | `average_expression_all_cells` | Raw mean expression. |
@@ -148,13 +148,13 @@ no tested pair that could have reached power 0.8 at all**, and those elements ca
 
 ### What `power` actually counts
 
-A replicate counts as a success when **both** hold:
+A simulation counts as a success when **both** hold:
 
 ```
 p_value < threshold   AND   log_2_fold_change < 0
 ```
 
-The second condition makes this one-sided: a replicate only counts if the simulated perturbation
+The second condition makes this one-sided: a simulation only counts if the simulated perturbation
 *reduced* expression. `threshold` is the largest nominal p-value that survived multiple-testing
 correction in the real discovery analysis, so "detected" means the same thing here as it did in your
 actual results.
@@ -162,30 +162,30 @@ actual results.
 ### Reading the confidence intervals
 
 Always read `power` together with its interval, especially at the boundaries. `power = 0` does not
-mean the pair is undetectable — at 100 replicates the Wilson upper bound is 0.037, so the data are
+mean the pair is undetectable — at 100 simulations the Wilson upper bound is 0.037, so the data are
 consistent with a true power of a few percent. Likewise `power = 1` has a lower bound of 0.963.
 
 The interval is Wilson rather than `p̂ ± 1.96·SE` precisely because the normal approximation returns
 `[0, 0]` for 0 successes, asserting certainty the data do not support. See
 [Choosing num_replicates]({{ site.baseurl }}{% link choosing-num-replicates.md %}).
 
-## `per_replicate/es<effect_size>/*.tsv.gz` — per-replicate detail
+## `per_replicate/es<effect_size>/*.tsv.gz` — per-simulation detail
 
-One row per (pair, replicate), gzipped. This is the only output from which power can be
-**re-derived** — subsampling replicates to study a reduced design, bootstrapping, or re-thresholding
+One row per (pair, simulation), gzipped. This is the only output from which power can be
+**re-derived** — subsampling simulations to study a reduced design, bootstrapping, or re-thresholding
 — so it is worth keeping even though it dominates the output volume.
 
 | Column | Meaning |
 |---|---|
 | `grna_target`, `response_id` | The pair. |
-| `p_value` | From the resampling test on this replicate's simulated counts. |
-| `log_2_fold_change` | Its effect estimate. Power counts a replicate only when `p_value` beats the discovery threshold **and** this is negative. |
-| `rep` | Replicate index, unique across chunks thanks to `--rep-offset`. |
+| `p_value` | From the resampling test on this simulation's simulated counts. |
+| `log_2_fold_change` | Its effect estimate. Power counts a simulation only when `p_value` beats the discovery threshold **and** this is negative. |
+| `rep` | Simulation index, unique across chunks thanks to `--rep-offset`. |
 | `effect_size` | The effect size simulated. Constant within a file, and kept because `compute_power.R` uses it to refuse an input that mixes effect sizes. |
 | `num_pert_cells` | Perturbed cells for this target. |
 | `pass_qc`, `n_nonzero_trt`, `n_nonzero_cntrl` | Diagnostics, carried over from the **real** discovery pairs rather than recomputed from simulated data — they describe the observed experiment. |
 
-**Five columns sceptre returns are dropped before writing**, because at 100 replicates × 34,886
+**Five columns sceptre returns are dropped before writing**, because at 100 simulations × 34,886
 pairs × 6 effect sizes they were 39 % of a 3 GB output and nothing read them:
 
 | Dropped | Why |
@@ -195,7 +195,7 @@ pairs × 6 effect sizes they were 39 % of a 3 GB output and nothing read them:
 | `significant` | sceptre's own call at *its* threshold, not the discovery threshold this pipeline tests against. `compute_power.R` recomputes it, so keeping the column invited the wrong one being believed. |
 | `average_expression_all_cells` | A per-*gene* constant that was repeated once per replicate. `summarize_power.R --sim-input` joins it from `sim_input.rds`, where it is stored once. |
 
-Together with gzip that takes the per-replicate output from ~3 GB to a few hundred MB for a
+Together with gzip that takes the per-simulation output from ~3 GB to a few hundred MB for a
 six-point sweep at 100 replicates. Nothing needs a decompression step: `read.delim` sniffs the
 magic number and handles `.tsv.gz` and `.tsv` alike, and `compute_power.R` accepts either.
 
@@ -207,9 +207,9 @@ magic number and handles `.tsv.gz` and `.tsv` alike, and `compute_power.R` accep
 | `sceptre_template.rds` | The sceptre object with `@response_matrix` and `@grna_matrix` emptied. Neither is read by the discovery analysis once gRNAs are assigned. |
 | `pairs.tsv` | `grna_target`, `response_id` for QC-passing pairs only. |
 | `grna_targets.tsv` | `grna_id`, `grna_target`. |
-| `discovery_threshold.txt` | A single number: the p-value a replicate must beat. |
+| `discovery_threshold.txt` | A single number: the p-value a simulation must beat. |
 | `analysis_mode.tsv` | `resampling_mechanism` (`crt` or `permutations`), `run_permutations`, and `moi`. Which test produced these power numbers. |
-| `null_precomputations.rds` | Per-gene null models, one set per replicate, fitted on a null simulation. |
+| `null_precomputations.rds` | Per-gene null models, one set per simulation, fitted on a null simulation. |
 
 `split_*.tsv` is **not published**. The splits are parallelisation bookkeeping — 1,000 files per
 sample — and they are regenerable: the bin packing is deterministic given `pairs.tsv` and

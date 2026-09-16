@@ -1,17 +1,17 @@
 #!/usr/bin/env Rscript
 #
-# Turn per-replicate simulation results into a power estimate per element-gene pair.
+# Turn the per-simulation results into a power estimate per element-gene pair.
 #
-# Power is the fraction of replicates in which sceptre would have called the association:
+# Power is the fraction of simulations in which sceptre would have called the association:
 #
 #   power = mean(p_value < threshold & log_2_fold_change < 0)
 #
-# The log_2_fold_change condition makes this one-sided -- a replicate only counts if the simulated
+# The log_2_fold_change condition makes this one-sided -- a simulation only counts if the simulated
 # perturbation reduced expression.
 #
-# Because that is a binomial proportion over a finite number of replicates, the point estimate is
+# Because that is a binomial proportion over a finite number of simulations, the point estimate is
 # reported with a Wilson score interval. See docs/choosing-num-replicates.md for how to pick the
-# replicate count and how to read the intervals.
+# simulation count and how to read the intervals.
 #
 # Three fixes relative to compute_power_from_simulations.R:
 #
@@ -69,9 +69,9 @@ option_list <- list(
   make_option("--out", type = "character", default = NULL, dest = "out",
               help = "Output TSV, one row per pair."),
   make_option("--subsample-reps", type = "integer", default = NULL, dest = "subsample_reps",
-              help = paste("Compute power from this many randomly chosen replicates instead of",
+              help = paste("Compute power from this many randomly chosen simulations instead of",
                            "all of them. For the reduced-design study in broadinstitute/WattEG-paper;",
-                           "has no place in a production run, where every replicate that was paid",
+                           "has no place in a production run, where every simulation that was paid",
                            "for should be used.")),
   make_option("--subsample-seed", type = "integer", default = 1L, dest = "subsample_seed",
               help = paste("Seed for --subsample-reps [default %default]. Vary it to repeat the",
@@ -81,7 +81,7 @@ option_list <- list(
 
 opts <- parse_args(OptionParser(
   option_list = option_list,
-  description = "Compute power per pair from per-replicate simulation results."
+  description = "Compute power per pair from the per-simulation results."
 ))
 require_options(opts, c("simulations", "out"))
 
@@ -113,7 +113,7 @@ if (!is.finite(threshold) || threshold <= 0 || threshold > 1) {
 paths <- trimws(strsplit(opts$simulations, ",", fixed = TRUE)[[1]])
 
 # A directory expands to the TSVs inside it. The Nextflow runner passes an explicit file list, which
-# is what makes the replicate-count check below meaningful -- it validates the files it was handed.
+# is what makes the simulation-count check below meaningful -- it validates the files it was handed.
 # But a sweep publishes 1,000 files per effect size, and naming them all on a command line to
 # re-aggregate an existing sweep (the reduced-design study does this hundreds of times) is a
 # 100 KB argument list for no benefit. Sorted, so the row order does not depend on readdir order.
@@ -154,19 +154,19 @@ read_one <- function(path) {
 }
 
 sims <- do.call(rbind, lapply(paths, read_one))
-log_step("Read ", nrow(sims), " replicate rows from ", length(paths), " file(s)")
+log_step("Read ", nrow(sims), " simulation rows from ", length(paths), " file(s)")
 
-# Replicates with no fold change estimate carry no information about whether the association would
+# Simulations with no fold change estimate carry no information about whether the association would
 # have been called, so they are dropped -- which means n_reps can fall below --reps and has to be
 # reported per pair rather than assumed.
 n_before <- nrow(sims)
 sims <- sims[!is.na(sims$log_2_fold_change) & !is.na(sims$p_value), , drop = FALSE]
 if (nrow(sims) < n_before) {
-  log_step("Dropped ", n_before - nrow(sims), " replicate row(s) with a missing p_value or ",
+  log_step("Dropped ", n_before - nrow(sims), " simulation row(s) with a missing p_value or ",
            "log_2_fold_change")
 }
 if (nrow(sims) == 0) {
-  stop("No usable replicate rows remain.", call. = FALSE)
+  stop("No usable simulation rows remain.", call. = FALSE)
 }
 
 if (anyDuplicated(sims[, c("grna_target", "response_id", "rep")])) {
@@ -175,34 +175,34 @@ if (anyDuplicated(sims[, c("grna_target", "response_id", "rep")])) {
        "values across chunks would double-count replicates.", call. = FALSE)
 }
 
-# --- optional: keep only a subsample of the replicates ------------------------------------------
+# --- optional: keep only a subsample of the simulations ------------------------------------------
 #
-# For the reduced-design study in broadinstitute/WattEG-paper, which asks whether fewer replicates
+# For the reduced-design study in broadinstitute/WattEG-paper, which asks whether fewer simulations
 # and fewer effect sizes reproduce the full design. That question is answered by SUBSAMPLING an existing
-# sweep rather than by running smaller ones: replicates are i.i.d. draws, so a random subset of 30
-# is distributed exactly like a fresh 30-replicate run, and subsampling makes the comparison paired
+# sweep rather than by running smaller ones: simulations are i.i.d. draws, so a random subset of 30
+# is distributed exactly like a fresh 30-simulation run, and subsampling makes the comparison paired
 # -- the same pairs, the same simulated data -- which a rerun would not be.
 #
-# The SAME replicate ids are kept for every pair, deliberately. A replicate index is arbitrary, so
-# one shared subset is the faithful analogue of "we ran 30 replicates"; drawing an independent
-# subset per pair would average over more of the replicate noise than a real 30-replicate run does
+# The SAME simulation ids are kept for every pair, deliberately. A simulation index is arbitrary, so
+# one shared subset is the faithful analogue of "we ran 30 simulations"; drawing an independent
+# subset per pair would average over more of the Monte-Carlo noise than a real 30-simulation run does
 # and would flatter the reduced design.
 #
 # Sampling from the observed ids rather than 1:reps because rows with a missing fold change have
-# already been dropped above, so a pair can have fewer than --reps replicates present.
+# already been dropped above, so a pair can have fewer than --reps simulations present.
 if (!is.null(opts$subsample_reps)) {
   available <- sort(unique(sims$rep))
   if (opts$subsample_reps > length(available)) {
     stop("--subsample-reps ", opts$subsample_reps, " exceeds the ", length(available),
-         " replicate(s) present.", call. = FALSE)
+         " simulation(s) present.", call. = FALSE)
   }
   set.seed(opts$subsample_seed)
   keep <- sort(sample(available, opts$subsample_reps))
   sims <- sims[sims$rep %in% keep, , drop = FALSE]
-  log_step("Subsampled to ", length(keep), " of ", length(available), " replicates ",
+  log_step("Subsampled to ", length(keep), " of ", length(available), " simulations ",
            "(seed ", opts$subsample_seed, "): ", nrow(sims), " rows remain")
   if (nrow(sims) == 0) {
-    stop("No replicate rows remain after subsampling.", call. = FALSE)
+    stop("No simulation rows remain after subsampling.", call. = FALSE)
   }
 }
 
@@ -253,7 +253,7 @@ write_tsv_file(power, opts$out)
 log_step("Wrote ", nrow(power), " pairs to ", opts$out)
 
 reps_range <- range(power$n_reps)
-message(sprintf("  replicates per pair: %d-%d", reps_range[1], reps_range[2]))
+message(sprintf("  simulations per pair: %d-%d", reps_range[1], reps_range[2]))
 message(sprintf("  mean power: %.3f | pairs at 0: %d | at 1: %d | in (0.1,0.9): %d of %d",
                 mean(power$power), sum(power$power == 0), sum(power$power == 1),
                 sum(power$power > 0.1 & power$power < 0.9), nrow(power)))
@@ -261,6 +261,6 @@ message(sprintf("  median 95%% CI width: %.3f  (widest %.3f)",
                 stats::median(power$power_ci_high - power$power_ci_low),
                 max(power$power_ci_high - power$power_ci_low)))
 if (min(power$n_reps) < 100 && is.null(opts$subsample_reps)) {
-  message("  note: with fewer than ~100 replicates a per-pair estimate is coarse; see ",
+  message("  note: with fewer than ~100 simulations a per-pair estimate is coarse; see ",
           "docs/choosing-num-replicates.md")
 }

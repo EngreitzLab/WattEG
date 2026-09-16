@@ -95,10 +95,10 @@ Parameters live in `config/config.yml`.
 |---|---|
 | `power_at_effect_size_15` | power at a 15% knockdown, one column per effect size |
 | `power_at_effect_size_15_ci_low` / `_ci_high` | 95% Wilson interval |
-| `power_at_effect_size_15_n_reps` | replicates behind the estimate |
+| `power_at_effect_size_15_n_reps` | simulations behind the estimate |
 | `min_detectable_effect_size` | smallest tested effect size reaching the target power |
 
-Always read a power estimate together with its interval: `power = 0` at 100 replicates has a 95%
+Always read a power estimate together with its interval: `power = 0` at 100 simulations has a 95%
 upper bound of 0.037, so it means "not detected in 100 tries", not "undetectable".
 
 See [Output](https://engreitzlab.github.io/WattEG/output/) for every column.
@@ -106,7 +106,7 @@ See [Output](https://engreitzlab.github.io/WattEG/output/) for every column.
 ## Choosing parameters
 
 `num_replicates` is the only parameter that changes results; `n_splits` and `reps_per_chunk` only
-change how the work is divided. How many replicates you need depends on what you do with the
+change how the work is divided. How many simulations you need depends on what you do with the
 numbers — read
 [Choosing num_replicates](https://engreitzlab.github.io/WattEG/choosing-num-replicates/).
 

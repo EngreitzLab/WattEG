@@ -34,7 +34,11 @@ truncate -s 1899680000 "${TEST_DIR}/inputs/trans_sim.tsv.gz"
 truncate -s 1501940740 "${TEST_DIR}/inputs/replicates.parquet"
 
 export NXF_HOME="${SCRATCH}/nxf_home_config_test"
-export NXF_WORK="${SCRATCH}/watteg_config_test_work"
+# Per-job work directory, which matters for the summary at the bottom: it globs the task outputs,
+# and a shared work directory accumulates them across runs. The first version of this test printed
+# every value twice -- this run's and the previous run's -- which means a FAILED run would have
+# shown the previous run's passing numbers and read as a pass.
+export NXF_WORK="${SCRATCH}/watteg_config_test_work/${SLURM_JOB_ID:-manual}"
 ml load biology nextflow
 
 cd "${TEST_DIR}"

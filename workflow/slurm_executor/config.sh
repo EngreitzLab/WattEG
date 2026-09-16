@@ -46,7 +46,7 @@ COMPARISON_DIR="${OUTDIR}/comparison"
 # configuration re-run against a *different* null-model bundle.
 #
 #   as_is     inherited real-data cache. Biased low by ~0.03; only for reproducing job 38849611.
-#   null_fit  per-replicate null models from step 02b. The correct configuration; production default.
+#   null_fit  per-simulation null models from step 02b. The correct configuration; production default.
 #   cleared   refits inside every call. The faithful reference, 4.3x the cost. Never for production.
 #
 # See docs/status.md, "Settled -- which per-gene null model does the simulation test against?".
@@ -84,14 +84,14 @@ LOG_DIR="${REPO_ROOT}/logs/refactor"
 # one wave.
 EFFECT_SIZES=(0.15)
 
-NUM_REPLICATES=100     # Monte-Carlo replicates per pair
+NUM_REPLICATES=100     # Monte-Carlo simulations per pair
 SEED=20250812          # base RNG seed
 GUIDE_SD=0.13          # spread of per-gRNA effect sizes around the target effect size
 
 ## NULL MODELS (step 02b) =========================================================================
 #
-# Replicates per array task when fitting null models. One fit covers every gene (~237) on one
-# replicate and takes ~20 minutes, so 1 per task keeps wall clock at ~20 minutes for the whole set
+# Simulations per array task when fitting null models. One fit covers every gene (~237) on one
+# simulation and takes ~20 minutes, so 1 per task keeps wall clock at ~20 minutes for the whole set
 # instead of ~33 hours serial. Raise it only if the array-task budget is tight.
 REPS_PER_NULL_CHUNK=1
 
@@ -105,7 +105,7 @@ REPS_PER_NULL_CHUNK=1
 # run and this one. Both configurations skip the GLM fit -- one from the inherited cache, one from
 # the bundle -- so RNG consumption matches too. Every difference in power is therefore attributable
 # to the null model, with zero Monte-Carlo noise between the two runs. That is why 20 splits are
-# decisive where 53 pairs at 5 replicates were only suggestive.
+# decisive where 53 pairs at 5 simulations were only suggestive.
 NULL_FIT_SUBSET_SPLITS=20
 
 # Parallel tasks per effect size. Does not affect results -- seeds derive from
@@ -130,10 +130,10 @@ NULL_FIT_SUBSET_SPLITS=20
 #
 # MEASURED cost, fitted on all 999 real tasks of job 38887744 (null_fit + gRNA precomputation
 # reuse): 1.140 s per target + 0.5561 s per pair, per replicate. Over 3,026 targets and 34,886
-# pairs at 100 replicates that is 635 CPU-hours per effect size predicted against 634 measured,
+# pairs at 100 simulations that is 635 CPU-hours per effect size predicted against 634 measured,
 # down from 999 before the gRNA reuse and against the old pipeline's 1,308 -- a 2.1x speedup.
 #
-# Do not re-derive this from the step 3 smoke test. That gave 9.68 s per target per replicate and
+# Do not re-derive this from the step 3 smoke test. That gave 9.68 s per target per simulation and
 # implied ~814 CPU-hours; it was measured before the gRNA reuse and on 36 targets.
 #
 #   effect sizes   N_SPLITS   tasks   per task    wall clock (all effect sizes)
@@ -144,7 +144,7 @@ NULL_FIT_SUBSET_SPLITS=20
 #
 # Rule of thumb: N_SPLITS ~= MAX_ARRAY_TASKS / number of effect sizes. And note the last row:
 # a full 5-50% sweep is 8,000+ CPU-hours simulated naively. See docs/status.md on two-stage
-# replicate allocation, and the cascading-effect-size idea, for how to avoid paying it.
+# simulation allocation, and the cascading-effect-size idea, for how to avoid paying it.
 #
 # Two other ceilings: whole targets stay together, so N_SPLITS can never usefully exceed the
 # 2,798 targets; and below ~5 minutes per task the fixed costs (container start, R startup, the

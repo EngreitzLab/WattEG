@@ -90,7 +90,7 @@ pixi_run Rscript src/split_pairs.R --pairs "${WORK}/prepared/pairs.tsv" \
   --n-splits "${n_splits}" --outdir "${WORK}/splits"
 
 echo
-echo ">>> step 2b/2c: null models (2 replicates)"
+echo ">>> step 2b/2c: null models (2 simulations)"
 pixi_run Rscript src/fit_null_models.R \
   --sim-input "${WORK}/prepared/sim_input.rds" \
   --sceptre-template "${WORK}/prepared/sceptre_template.rds" \
@@ -100,7 +100,7 @@ pixi_run Rscript src/merge_null_models.R \
   --inputs "${WORK}/null_chunk.rds" --reps 2 --out "${WORK}/null_precomputations.rds"
 
 echo
-echo ">>> step 4: simulate (2 replicates, first split)"
+echo ">>> step 4: simulate (2 simulations, first split)"
 first_split=$(ls "${WORK}/splits"/split_*.tsv | head -1)
 pixi_run Rscript src/run_power_simulation.R \
   --sim-input "${WORK}/prepared/sim_input.rds" \

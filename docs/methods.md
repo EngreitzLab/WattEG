@@ -37,7 +37,7 @@ picked at random, per replicate.
 
 ## Simulating counts
 
-For each replicate, for gene *i* and cell *j*:
+For each simulation, for gene *i* and cell *j*:
 
 ```
 mu[i, j] = mean[i] * size_factor[j] * effect_size[i, j]
@@ -65,10 +65,10 @@ implementation stored dispersions in a list column with `NULL` holes; `unlist()`
 shortening the vector, and the negative-binomial draw then recycled it — so every gene after the
 first gap would have been simulated with another gene's dispersion, with no warning.
 
-## Deciding whether a replicate "detects" the pair
+## Deciding whether a simulation "detects" the pair
 
 The simulated counts are handed to sceptre's `run_discovery_analysis()` with the pair table narrowed
-to the target under test, and a replicate counts as a detection when
+to the target under test, and a simulation counts as a detection when
 
 ```
 p_value < threshold   AND   log_2_fold_change < 0
@@ -82,13 +82,13 @@ discovery analysis**, read from `@discovery_result`. Using the empirical thresho
 ## Why control-cell sampling is not used
 
 Using all non-perturbed cells as controls is expensive — a typical target has a few hundred
-perturbed cells against several hundred thousand controls, and every replicate simulates all of
+perturbed cells against several hundred thousand controls, and every simulation simulates all of
 them. Sampling controls is the obvious optimisation, and it does not work.
 
 Measured on the reference dataset (3 targets spanning 180/525/1,227 perturbed cells, 33 pairs, 30
-replicates, 15% effect size, paired by seed against the all-controls baseline):
+simulations, 15% effect size, paired by seed against the all-controls baseline):
 
-| `n_control_cells` | per-replicate cost | mean power | power retained | pairs lower / higher | sign test |
+| `n_control_cells` | per-simulation cost | mean power | power retained | pairs lower / higher | sign test |
 |---|---|---|---|---|---|
 | 1,000 | 0.37s | 0.137 | 39.5% | 25 / 1 | p < 0.0001 |
 | 2,000 | 0.42s | 0.197 | 56.7% | 23 / 0 | p < 0.0001 |
@@ -102,9 +102,9 @@ sceptre's discovery analysis is a **conditional randomisation test**: the cell c
 resolution of the resampled null tail. With a threshold near 8 × 10⁻⁴, a few thousand cells cannot
 reliably produce p-values that small, so genuinely detectable pairs fail to clear the bar.
 
-The speedup is also smaller than the reduction in matrix size suggests: per-replicate cost is
+The speedup is also smaller than the reduction in matrix size suggests: per-simulation cost is
 sub-linear in cell count (20× more controls costs only 1.7× more time), because a fixed ~0.3s per
-replicate is independent of it. The trade was roughly 7× speed for a 29% power loss at 5,000
+simulation is independent of it. The trade was roughly 7× speed for a 29% power loss at 5,000
 controls.
 
 `--n-control-cells` remains available for anyone who wants to validate it on their own data, and is
@@ -113,10 +113,10 @@ off by default.
 ## Monotonicity
 
 Power must not decrease as the effect size increases. On the reference dataset (33 pairs, 12
-replicates, effect sizes 0.15 / 0.25 / 0.5) mean power was 0.356 → 0.604 → 0.838, with a single
+simulations, effect sizes 0.15 / 0.25 / 0.5) mean power was 0.356 → 0.604 → 0.838, with a single
 per-pair decrease of 0.08 → 0.00 that a two-proportion test could not distinguish from
-Monte-Carlo noise (p = 1.0 at 12 replicates). This is a useful sanity check on any new dataset: a
-systematic violation, or one that survives at high replicate counts, indicates a problem rather than
+Monte-Carlo noise (p = 1.0 at 12 simulations). This is a useful sanity check on any new dataset: a
+systematic violation, or one that survives at high simulation counts, indicates a problem rather than
 noise.
 
 ## Reproducibility
@@ -128,4 +128,4 @@ silently changed the reported power — and the version of this pipeline before 
 `set.seed()` nowhere at all, so no run could be reproduced.
 
 Per-target random work (control selection, and picking one gRNA per cell) is seeded with the
-replicate index 0, reserved for setup, so it too is independent of task layout.
+simulation index 0, reserved for setup, so it too is independent of task layout.

@@ -4,7 +4,7 @@
 #
 # WHY THIS STEP EXISTS
 #
-# The per-replicate output is the only thing power can be RE-derived from: subsampling replicates to
+# The per-simulation output is the only thing power can be RE-derived from: subsampling simulations to
 # study a reduced design, bootstrapping the reference, or re-thresholding all read it rather than
 # re-simulating. That makes it worth keeping, and worth keeping in a form that is cheap to read.
 #
@@ -51,7 +51,7 @@ option_list <- list(
               help = paste("Per-replicate outputs of run_power_simulation.R: a directory, or a",
                            "comma-separated list. Both .tsv and .tsv.gz are accepted.")),
   make_option("--out", type = "character", default = NULL, dest = "out",
-              help = "Output .parquet, one row per (pair, replicate)."),
+              help = "Output .parquet, one row per (pair, simulation)."),
   make_option("--compression", type = "character", default = "zstd", dest = "compression",
               help = paste("Parquet codec [default %default]. zstd compresses better than snappy",
                            "at similar read speed; 'uncompressed' is available for debugging."))

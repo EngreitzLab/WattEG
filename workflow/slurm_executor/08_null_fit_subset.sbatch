@@ -20,8 +20,8 @@
 # difference in power is therefore attributable to the null model, with no Monte-Carlo noise between
 # the two runs.
 #
-# That is why NULL_FIT_SUBSET_SPLITS splits at 100 replicates settle a question that 53 pairs at 5
-# replicates could only raise, at ~1/50th the cost of a second full sweep.
+# That is why NULL_FIT_SUBSET_SPLITS splits at 100 simulations settle a question that 53 pairs at 5
+# simulations could only raise, at ~1/50th the cost of a second full sweep.
 #
 # Only the first effect size is run: the bias is a property of the null model, not of the knockdown.
 #

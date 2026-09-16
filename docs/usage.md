@@ -112,8 +112,8 @@ Rscript src/run_power_simulation.R \
 | Option | Default | Meaning |
 |---|---|---|
 | `--effect-size` | required | Fractional decrease in expression: `0.15` = 15% knockdown. |
-| `--reps` | required | Replicates in this chunk. |
-| `--rep-offset` | `0` | Replicates already covered by earlier chunks; keeps the reported `rep` unique. |
+| `--reps` | required | Simulations in this chunk. |
+| `--rep-offset` | `0` | Simulations already covered by earlier chunks; keeps the reported `rep` unique. |
 | `--seed` | required | Base seed. Required, not optional — see *Reproducibility* below. |
 | `--guide-sd` | `0.13` | Spread of per-gRNA effect sizes around the target effect size. |
 | `--n-control-cells` | unset | Sample this many controls instead of using all. **Biases power downward; leave unset.** |
@@ -138,7 +138,7 @@ done
 
 ## 4. `compute_power.R`
 
-Turns per-replicate results into power per pair, with a Wilson interval.
+Turns per-simulation results into power per pair, with a Wilson interval.
 
 ```sh
 Rscript src/compute_power.R \
@@ -149,7 +149,7 @@ Rscript src/compute_power.R \
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--simulations` | required | Comma-separated per-replicate TSVs. |
+| `--simulations` | required | Comma-separated per-simulation TSVs. |
 | `--threshold-file` | — | File from step 1. Mutually exclusive with `--alpha`. |
 | `--alpha` | — | Explicit p-value threshold. Only for objects with no discovery results. |
 | `--conf-level` | `0.95` | Confidence level for the Wilson interval. |
@@ -177,10 +177,10 @@ Rscript src/summarize_power.R \
 which has two consequences worth relying on:
 
 - **Results do not depend on how work is divided.** The same `--seed` gives identical numbers
-  whether you use 1 split or 280, and whether replicates run in one chunk or ten. This is verified
+  whether you use 1 split or 280, and whether simulations run in one chunk or ten. This is verified
   in the test suite.
-- **Runs are extensible.** Going from 100 to 400 replicates leaves replicates 1–100 byte-identical,
-  so you can add replicates with `--rep-offset 100` instead of recomputing.
+- **Runs are extensible.** Going from 100 to 400 simulations leaves simulations 1–100 byte-identical,
+  so you can add simulations with `--rep-offset 100` instead of recomputing.
 
 ## Sizing a cluster run
 
@@ -190,16 +190,16 @@ all control cells:
 | Quantity | Value |
 |---|---|
 | One `run_discovery_analysis()` call | 3.4–4.8s |
-| Total at 100 replicates | ~295 CPU-hours per effect size |
+| Total at 100 simulations | ~295 CPU-hours per effect size |
 | Peak memory, simulation task | 1.5 GB → request 4 GB |
 | Peak memory, `prepare_sim_input.R` | 7.7 GB → request 12 GB |
 | Input read per task | 59 MB, ~1.1s |
 
-**Prefer more splits over more replicate chunks.** An extra split costs one extra ~1.1s input load;
-an extra replicate chunk re-pays the *per-target* setup (control selection, guide status, cell
-permutation) once per chunk per target. Only chunk replicates when you need more parallelism than
+**Prefer more splits over more simulation chunks.** An extra split costs one extra ~1.1s input load;
+an extra simulation chunk re-pays the *per-target* setup (control selection, guide status, cell
+permutation) once per chunk per target. Only chunk simulations when you need more parallelism than
 one-target-per-task, or when a single task would exceed your queue's time limit.
 
 For the dataset above, ~10 targets per task is about an hour of work, so `--n-splits 280` with no
-replicate chunking gives 280 tasks per effect size — comfortably under the `MaxArraySize` of 1000
+simulation chunking gives 280 tasks per effect size — comfortably under the `MaxArraySize` of 1000
 that most SLURM installations use.

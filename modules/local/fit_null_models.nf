@@ -13,8 +13,8 @@
 // WHY IT FANS OUT OVER REPLICATES AND NOTHING ELSE
 //
 // A gene's null model is fitted on a null simulation -- no knockdown -- so it depends on neither the
-// target nor the effect size. One fit per (gene, replicate) therefore serves every target and every
-// effect size in a sweep: 100 replicates, not 100 x targets x effect sizes. Fitting inside each
+// target nor the effect size. One fit per (gene, simulation) therefore serves every target and every
+// effect size in a sweep: 100 simulations, not 100 x targets x effect sizes. Fitting inside each
 // simulation task would pay for it n_splits times over.
 //
 // The seed is derived from (seed, rep) only, deliberately not (seed, target, rep, effect_size), for

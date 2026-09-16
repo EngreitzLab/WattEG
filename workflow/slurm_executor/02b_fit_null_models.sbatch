@@ -19,14 +19,14 @@
 # discovery calls flipped against a faithful refit, all in the same direction; see docs/status.md).
 #
 # A null simulation applies no knockdown, so its fit depends on neither the target nor the effect
-# size. One fit per (gene, replicate) therefore serves every target the gene pairs with (~147 on
+# size. One fit per (gene, simulation) therefore serves every target the gene pairs with (~147 on
 # average), every split, and the whole effect-size sweep. Fitting inside the simulation array would
 # instead pay for it once per task -- 1,000 times over.
 #
 # WHY AN ARRAY
 #
-# Measured: one replicate fits all 237 genes over 586,309 cells in 1,025s. Serial, 100 replicates
-# would be ~28.5 CPU-hours in one 28-hour job; as an array of one replicate per task it is ~17
+# Measured: one simulation fits all 237 genes over 586,309 cells in 1,025s. Serial, 100 simulations
+# would be ~28.5 CPU-hours in one 28-hour job; as an array of one simulation per task it is ~17
 # minutes of wall clock for the same CPU. The chunks are merged by step 02c.
 #
 # RESOURCES
@@ -54,16 +54,16 @@ rep_offset=$(( (SLURM_ARRAY_TASK_ID - 1) * REPS_PER_NULL_CHUNK ))
 reps_here=${REPS_PER_NULL_CHUNK}
 
 # The last chunk is short whenever NUM_REPLICATES is not a multiple of REPS_PER_NULL_CHUNK. Without
-# this the merge would find replicates beyond NUM_REPLICATES and reject the whole set.
+# this the merge would find simulations beyond NUM_REPLICATES and reject the whole set.
 if (( rep_offset + reps_here > NUM_REPLICATES )); then
   reps_here=$(( NUM_REPLICATES - rep_offset ))
 fi
 if (( reps_here <= 0 )); then
-  echo "Task ${SLURM_ARRAY_TASK_ID} has no replicates to fit (offset ${rep_offset} of ${NUM_REPLICATES}); nothing to do."
+  echo "Task ${SLURM_ARRAY_TASK_ID} has no simulations to fit (offset ${rep_offset} of ${NUM_REPLICATES}); nothing to do."
   exit 0
 fi
 
-log_header "Step 2b: null models for replicates $((rep_offset + 1))-$((rep_offset + reps_here))"
+log_header "Step 2b: null models for simulations $((rep_offset + 1))-$((rep_offset + reps_here))"
 
 load_pixi
 require_file "${PREPARED_DIR}/sim_input.rds"        "sim_input.rds from step 01"
@@ -73,7 +73,7 @@ require_file "${PREPARED_DIR}/grna_targets.tsv"     "grna_targets.tsv from step 
 mkdir -p "${NULL_MODELS_DIR}"
 chunk_out="${NULL_MODELS_DIR}/$(printf 'chunk_%04d.rds' "${rep_offset}")"
 
-echo "  replicates:  $((rep_offset + 1))-$((rep_offset + reps_here)) of ${NUM_REPLICATES}"
+echo "  simulations:  $((rep_offset + 1))-$((rep_offset + reps_here)) of ${NUM_REPLICATES}"
 echo "  seed:        ${SEED}  (must match step 04)"
 echo "  output:      ${chunk_out}"
 echo

@@ -94,7 +94,7 @@ default, so unpatched sceptre behaves identically and nothing in `patches/` chan
 Why a patch rather than a wrapper: on the CRT path sceptre regresses perturbation status on the
 covariates and draws its synthetic assignments from the fitted probabilities. That fit depends only
 on the gRNA-to-cell assignments and the covariate matrix, never on the counts, so it is identical
-for all `--reps` replicates of a target. But unlike `@response_precomputations` there was no slot to
+for all `--reps` simulations of a target. But unlike `@response_precomputations` there was no slot to
 hand it back in through — `fitted_probabilities` is a local variable in
 `crt_glm_factored_out()` — so reusing it needs a signature change.
 
@@ -202,12 +202,12 @@ A fuller account, with the commands to run the outstanding comparisons on a clus
 - **Workflow orchestration.** The five steps are complete and run standalone; a Nextflow workflow
   with a SLURM profile is not yet in the repository. `config/config.yml` already carries the
   parameters it will consume.
-- **Two-stage replicate allocation** is documented but not orchestrated. The scripts support it
+- **Two-stage simulation allocation** is documented but not orchestrated. The scripts support it
   today via `--rep-offset`.
 - **Equivalence with the pre-refactor pipeline** is proven for the upstream statistics — size
   factors, normalised means and raw means are bit-identical, and dropping `@grna_matrix` was verified
   to leave discovery results unchanged — but the simulation itself has not been compared draw-for-draw
-  against the old code. Seeding moved inside the replicate loop, so that comparison has to be
+  against the old code. Seeding moved inside the simulation loop, so that comparison has to be
   distributional rather than exact.
 - **The legacy `R/` directory** is still present so the old Snakemake pipeline remains runnable for
   comparison. `pixi run lint` reports its non-conforming identifiers; both go away when it is removed.

@@ -1,7 +1,7 @@
-// Step 4 -- the simulation. One task per (split, effect size, replicate chunk).
+// Step 4 -- the simulation. One task per (split, effect size, simulation chunk).
 //
 // This is where essentially all of the compute goes: 635 CPU-hours per effect size on
-// day0_grna20_no_shuffle at 100 replicates, against a few CPU-hours for everything else combined.
+// day0_grna20_no_shuffle at 100 simulations, against a few CPU-hours for everything else combined.
 //
 // WHY THE FAN-OUT IS OVER (split x effect size) AND NOT A LOOP OVER EFFECT SIZES
 //
@@ -22,7 +22,7 @@ process POWER_SIMULATION {
     tag "${meta.id} ${split.baseName} es${effect_size} reps ${rep_offset + 1}-${rep_offset + reps}"
 
     // Published for the same reason the sbatch runner keeps them: they are the only record of the
-    // per-replicate p-values, they let a run be compared split by split against the other runner,
+    // per-simulation p-values, they let a run be compared split by split against the other runner,
     // and re-deriving one costs a full task. This is the bulky output -- ~1,000 files per effect
     // size, a few hundred MB in total.
     // NOT published. These per-split files are what makes the run resumable and preemption-tolerant --
@@ -41,7 +41,7 @@ process POWER_SIMULATION {
     tuple val(meta), val(effect_size), path(out_name), emit: sim
 
     script:
-    // The replicate range is part of the filename so chunks of one split cannot collide, and so a
+    // The simulation range is part of the filename so chunks of one split cannot collide, and so a
     // stray file is attributable. With no chunking (reps_per_chunk == num_replicates) there is
     // exactly one per split, which is what every measured run has done.
     out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv.gz"
@@ -60,7 +60,7 @@ process POWER_SIMULATION {
             --seed ${params.seed} \\
             --out ${out_name}
 
-    # A short file means replicate rows were lost, which compute_power.R would otherwise absorb as
+    # A short file means simulation rows were lost, which compute_power.R would otherwise absorb as
     # a smaller denominator for the affected pairs.
     n_pairs=\$(( \$(wc -l < ${split}) - 1 ))
     expected=\$(( n_pairs * ${reps} + 1 ))

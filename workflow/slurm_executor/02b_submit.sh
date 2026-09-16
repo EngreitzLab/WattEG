@@ -30,12 +30,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Ceiling division: with 100 replicates at 1 per chunk that is 100 tasks, and a non-multiple leaves a
+# Ceiling division: with 100 simulations at 1 per chunk that is 100 tasks, and a non-multiple leaves a
 # short final chunk, which 02b handles.
 n_tasks=$(( (NUM_REPLICATES + REPS_PER_NULL_CHUNK - 1) / REPS_PER_NULL_CHUNK ))
 
 echo "Null models"
-echo "  replicates:        ${NUM_REPLICATES}"
+echo "  simulations:        ${NUM_REPLICATES}"
 echo "  reps per chunk:    ${REPS_PER_NULL_CHUNK}"
 echo "  array tasks:       ${n_tasks}"
 echo "  chunk directory:   ${NULL_MODELS_DIR}"

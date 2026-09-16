@@ -15,7 +15,7 @@
 # size-factor shuffle already removed, so old and new implement the same statistical model and
 # their power estimates should agree up to Monte-Carlo noise.
 #
-# The comparison cannot be exact. Seeding moved inside the replicate loop during the refactor, so
+# The comparison cannot be exact. Seeding moved inside the simulation loop during the refactor, so
 # the RNG streams differ, and the old pipeline has no set.seed() at all -- two runs of it do not
 # agree with each other either. See workflow/compare_old_new.R for what is checked exactly and
 # what is checked distributionally.

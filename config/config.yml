@@ -30,7 +30,7 @@ outdir: results/nextflow
 effect_sizes:
   - 0.15
 
-# Monte-Carlo replicates per element-gene pair.
+# Monte-Carlo simulations per element-gene pair.
 #
 # 100 is the floor for the question this is for. Certifying "power was at least 0.8" needs 88/100
 # successes, so power_ci_low is what gets thresholded, not power -- see
@@ -44,14 +44,14 @@ guide_sd: 0.13
 # (seed, target, rep, effect_size), so output is invariant to the split layout.
 n_splits: 1000
 
-# Replicates per null-model task (step 02b). One fit covers every gene on one replicate in ~20
+# Simulations per null-model task (step 02b). One fit covers every gene on one simulation in ~20
 # minutes, so 1 per task keeps the whole set at ~20 minutes rather than ~33 hours serial.
 reps_per_null_chunk: 1
 
-# Replicates per simulation task. Set equal to num_replicates for no chunking, which is what every
+# Simulations per simulation task. Set equal to num_replicates for no chunking, which is what every
 # run so far has done and what the measured cost model assumes.
 #
-# Chunking splits a (split, effect size) task's replicates across several tasks, tracked by the
+# Chunking splits a (split, effect size) task's simulations across several tasks, tracked by the
 # scripts' --rep-offset so the `rep` column stays unique. It exists for the two-stage allocation in
 # docs/choosing-num-replicates.md, and it is NOT free: each chunk re-pays the per-target setup, so
 # prefer raising n_splits over lowering this. See docs/status.md, "Decisions already made".

@@ -10,7 +10,7 @@
 #' Preferred over the normal approximation `p +/- z*sqrt(p(1-p)/n)` because these estimates live at
 #' the boundaries, where that approximation degenerates: 0 successes out of 100 gives the interval
 #' [0, 0], asserting the power is certainly zero. Wilson gives [0, 0.037], which is what 100
-#' replicates without a success actually supports.
+#' simulations without a success actually supports.
 #'
 #' This matters beyond tidiness: `power_ci_low` is the column thresholded to certify a negative, so
 #' an interval that collapses at the boundary would certify claims the data cannot support.

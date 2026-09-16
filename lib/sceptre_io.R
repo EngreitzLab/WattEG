@@ -279,7 +279,7 @@ slim_sceptre_object <- function(so) {
   #
   # sceptre skips fitting a gene's null model whenever @response_precomputations already holds an
   # entry for it -- exact memoization in a real analysis, where the gene's counts are identical in
-  # every one of the ~147 pairs it appears in. In a simulation the counts are redrawn every replicate,
+  # every one of the ~147 pairs it appears in. In a simulation the counts are redrawn every simulation,
   # so carrying these entries over means testing simulated counts against coefficients fitted to real
   # counts. Measured, that understates power: 7 of 265 discovery calls flipped against a faithful
   # refit, all 7 in the same direction (docs/status.md).

@@ -1,10 +1,10 @@
-// Step 5 -- turn per-replicate simulation rows into a power estimate per pair.
+// Step 5 -- turn the per-simulation rows into a power estimate per pair.
 //
-// Power is the fraction of replicates whose p-value clears the discovery threshold, and the
+// Power is the fraction of simulations whose p-value clears the discovery threshold, and the
 // threshold comes from the sceptre object's own @discovery_result rather than from a nominal alpha,
 // so it reflects the multiple-testing correction actually applied.
 //
-// Wilson intervals, not the normal approximation: at 100 replicates the normal interval gives
+// Wilson intervals, not the normal approximation: at 100 simulations the normal interval gives
 // [0, 0] for a pair that never cleared the threshold, which is exactly the case the analysis cares
 // about. `power_ci_low` is what gets thresholded to certify a negative -- see
 // docs/output.md#interpreting-negatives.
@@ -27,7 +27,7 @@ process COMPUTE_POWER {
     """
     # A comma-separated list rather than a glob: compute_power.R accepts either, but an explicit
     # list is a single token and its ordering is stable.
-    # Both forms matched: the per-replicate output is gzipped, but an older sweep being
+    # Both forms matched: the per-simulation output is gzipped, but an older sweep being
     # re-aggregated is plain .tsv. Missing the .gz here would have found no files and produced an
     # empty power table rather than an error.
     sim_list=\$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null | paste -sd, -)

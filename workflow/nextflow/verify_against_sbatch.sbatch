@@ -17,9 +17,9 @@
 # two agree.
 #
 # Byte-identity is the bar for everything except the null-model bundle, which the two runners may
-# cover to different depths (a test run fits 2 replicates, a production run 100). For that one the
-# comparison is over the shared replicates, and it should still be exact -- null models are seeded
-# from (seed, rep) alone, so replicate 1 is the same object either way.
+# cover to different depths (a test run fits 2 simulations, a production run 100). For that one the
+# comparison is over the shared simulations, and it should still be exact -- null models are seeded
+# from (seed, rep) alone, so simulation 1 is the same object either way.
 #
 # Usage:
 #   sbatch workflow/nextflow/verify_against_sbatch.sbatch [nextflow_outdir]
@@ -75,7 +75,7 @@ else
 fi
 
 echo
-echo ">>> null_precomputations.rds -- shared replicates"
+echo ">>> null_precomputations.rds -- shared simulations"
 nf_null="${NF_DIR}/prepared/null_precomputations.rds"
 if [[ -s "${nf_null}" && -s "${NULL_MODELS}" ]]; then
   pixi_run Rscript workflow/compare_null_models.R \
@@ -87,7 +87,7 @@ else
 fi
 
 echo
-echo ">>> sim/ -- per-replicate rows, over the replicates both runners covered"
+echo ">>> sim/ -- per-simulation rows, over the simulations both runners covered"
 #
 # NOT a byte comparison, and the reason matters.
 #
@@ -99,7 +99,7 @@ echo ">>> sim/ -- per-replicate rows, over the replicates both runners covered"
 # agrees to five significant figures past the fifteenth.
 #
 # Demanding byte-identity here would therefore fail on hardware, not on the pipeline. What must
-# hold is the thing power is computed from: whether each replicate clears the discovery threshold.
+# hold is the thing power is computed from: whether each simulation clears the discovery threshold.
 # That is checked exactly, and any disagreement is a real defect.
 ES="${EFFECT_SIZES[0]}"
 nf_sim_dir="${NF_DIR}/sim/es${ES}"
@@ -140,7 +140,7 @@ if [[ -d "${nf_sim_dir}" && -d "${sb_sim_dir}" ]]; then
   done < "${pairs_file}" | tee "${pairs_file}.out"
 
   if grep -q "__FLIP__" "${pairs_file}.out" 2>/dev/null; then
-    echo "  FAIL -- a replicate changed significance between runners."
+    echo "  FAIL -- a simulation changed significance between runners."
     status=1
   elif [[ "${n_checked}" -eq 0 ]]; then
     echo "  SKIP (no overlapping split outputs)"

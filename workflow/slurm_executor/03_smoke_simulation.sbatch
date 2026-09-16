@@ -41,7 +41,7 @@ mkdir -p "${SMOKE_DIR}"
 # up leftovers from an earlier run, and because split_pairs.R pads the split index to the width of
 # --n-splits, a previous run at a different N_SPLITS leaves *differently named* files that a glob
 # cannot tell apart: 280 splits give smoke_split_001_*.tsv, 1000 give smoke_split_0001_*.tsv. That is
-# not hypothetical -- it made the replicate-count check below fail against 250-row files from a
+# not hypothetical -- it made the simulation-count check below fail against 250-row files from a
 # 280-split run while every file this run wrote was correct. Step 02 avoids the same trap by
 # `rm -rf`-ing its output directory; this keeps prior smoke output instead, since it is cheap to keep
 # and occasionally useful to compare against.
@@ -112,7 +112,7 @@ awk -F'\t' '
     printf "    pairs with != %d reps    %d\n", REPS, bad + 0
     printf "    NA p_value              %d\n", na_p + 0
     printf "    NA log_2_fold_change    %d\n", na_lfc + 0
-    if (bad > 0)          { print  "    ERROR: replicate count per pair is wrong"; exit 1 }
+    if (bad > 0)          { print  "    ERROR: simulation count per pair is wrong"; exit 1 }
     if (na_p >= n)        { print  "    ERROR: every p_value is NA"; exit 1 }
   }
 ' REPS="${SMOKE_REPS}" "${smoke_outputs[@]}"
