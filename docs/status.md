@@ -598,7 +598,7 @@ is a much stronger result than "it ran": a single difference anywhere in the con
 environment, R version or patched sceptre would perturb the serialised objects. The environment
 integration is therefore the same one the measurements came from.
 
-#### Four traps, each of which reported something other than its cause
+#### Five traps, each of which reported something other than its cause
 
 Recorded because every one cost time and none is guessable from the error text.
 
@@ -621,6 +621,26 @@ Recorded because every one cost time and none is guessable from the error text.
    `--bind false:false` and apptainer died with "unable to add false to mount list: destination must
    be an absolute path". It had also silently reached `PIXI_CACHE_DIR` and friends. The variables are
    named `scratchDir`/`groupHomeDir` for that reason — do not tidy them back.
+5. **A memory closure that does arithmetic on a memory *param* breaks when the param is a
+   String** — and it breaks in the one place with no diagnostics. `conf/base.config` computed
+   `params.power_simulation_memory_floor + (split.size() / 1MiB) * params.power_simulation_memory_slope_per_mb`.
+   Those default to `4.GB` / `64000.MB` in `nextflow.config`, which are `MemoryUnit`, so it worked
+   locally and on Sherlock. But JSON has no MemoryUnit, so a Seqera launch that sets them sends
+   `'4 GB'` and `'62.5 GB'` as **strings** — and `-params-file` beats the config (trap 3 again).
+   `Number.multiply(String)` throws `MissingMethodException` while Nextflow is submitting the first
+   `POWER_SIMULATION` task.
+
+   That is an unusually opaque failure, because a directive closure is evaluated *before* a task
+   record exists: run `shrivelled_bhabha` (zqCjFyEUvTFEE, 2026-09-16) reported **all 103 tasks
+   COMPLETED**, no failed task anywhere, and simply stopped ~30 s after `MERGE_NULL_MODELS` with
+   nothing in the task list to inspect. Its predecessor `mighty_euler` on the *same commit* ran all
+   5,000 simulation tasks — because its params file happened not to mention the two keys.
+
+   Fixed by coercing inside each closure (`asMem()` in `conf/base.config`) rather than trusting the
+   declared type. **A param's type is decided by the launch, not by the config that declares it** —
+   so any param a closure computes with must be coerced, not assumed. Verified by a standalone
+   harness that includes the real `conf/base.config` and sets every memory param as a String, the
+   exact shape a Seqera launch sends; it is in `tests/config/` and runs in seconds.
 
 Two smaller ones: the driver must resolve `REPO_ROOT` from `scontrol show job ... Command=` rather
 than `$BASH_SOURCE`, because Slurm copies the script into its spool directory; and Nextflow's
