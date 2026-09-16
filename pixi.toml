@@ -147,7 +147,7 @@ dev = ["dev"]
 [tasks]
 check-api = { cmd = "Rscript src/check_sceptre_api.R", description = "Verify the pinned sceptre exposes every internal slot the pipeline depends on" }
 pipeline-test = { cmd = "nextflow run . -profile stub -params-file config/test.yml -stub-run", description = "Check the Nextflow DAG wiring without running anything" }
-install-hooks = { cmd = "git config core.hooksPath .githooks && echo 'core.hooksPath -> .githooks'", description = "Enable the repository pre-commit hook" }
+install-hooks = { cmd = "./.githooks/install.sh", description = "Enable the repository pre-commit hook (core.hooksPath needs git >= 2.9; also symlinks into .git/hooks, which every git honours)" }
 lint = { cmd = "./.githooks/pre-commit --all", description = "Run the pre-commit checks across every tracked file" }
 
 # Scoped to the environments that carry the extra dependencies, so `pixi run setup`
