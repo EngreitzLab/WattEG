@@ -182,7 +182,7 @@ if (any(d != 0)) {
   cat(sprintf("  paired signed-rank p:       %.3g\n", st$p.value))
 }
 
-# The deliverable is a per-pair certification at power >= 0.8, so what matters is not the mean shift
+# The deliverable is a per-pair claim of measured power >= 0.8, so what matters is not the mean shift
 # but how many pairs change side of that line. See docs/output.md.
 for (cut in c(0.8, 0.5)) {
   a <- sum(merged$power_as_is >= cut)

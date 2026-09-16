@@ -6,7 +6,7 @@
 //
 // Wilson intervals, not the normal approximation: at 100 simulations the normal interval gives
 // [0, 0] for a pair that never cleared the threshold, which is exactly the case the analysis cares
-// about. `power_ci_low` is what gets thresholded to certify a negative -- see
+// about. `power_ci_low` is what gets thresholded to establish a negative -- see
 // docs/output.md#interpreting-negatives.
 
 process COMPUTE_POWER {

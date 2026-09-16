@@ -34,7 +34,7 @@ Two things about how these are derived are easy to get wrong, so they are stated
 **The direction of the interval inverts.** Power rises with effect size, so a *lower* bound on power
 gives a *larger* minimum detectable effect size. `min_detectable_effect_size_ci_high` is therefore
 computed from `power_ci_low`, not from `power_ci_high`. It is the pessimistic reading — the smallest
-knockdown the data can *certify* you would have caught — which is why it, not the point estimate,
+knockdown the data can *establish* you would have caught — which is why it, not the point estimate,
 is what a false-negative argument rests on. The bracket is built by thresholding each effect size's
 own 95 % interval, so read it as a conservative-to-optimistic range rather than an exact 95 %
 interval for the effect size itself.
@@ -88,8 +88,8 @@ else:
 | 100 | 88/100 |
 | 400 | 336/400 |
 
-Measured on 34,886 pairs at effect size 0.15 and 100 simulations: 37.7 % of pairs are certified
-(`power_ci_low` ≥ 0.8), 12.4 % are ambiguous, and 49.9 % are clearly underpowered
+Measured on 34,886 pairs at effect size 0.15 and 100 simulations: 37.7 % of pairs have measured
+power ≥ 0.8 (`power_ci_low`), 12.4 % are ambiguous, and 49.9 % are clearly underpowered
 (`power_ci_high` < 0.8). That last half is not a precision problem — no number of simulations fixes
 it; those pairs needed more perturbed cells or a larger effect.
 
@@ -130,7 +130,7 @@ term in the cost model is paid whether a target carries one gene or thirty — s
 The element-level statement that does hold up is a floor: **21.9 % of elements (663 of 3,026) have
 no tested pair that could have reached power 0.8 at all**, and those elements cannot support a
 "regulates nothing" claim under any reading. In the other direction, only 5 of 3,026 elements have
-*every* tested pair certified, so element-wide negative claims are essentially never assertable at
+measured power >= 0.8 for *every* tested pair, so element-wide negative claims are essentially never assertable at
 100 simulations and a 15 % knockdown. Worth knowing before building a figure around them.
 
 ## `power_es<effect_size>.tsv` — per effect size

@@ -12,8 +12,8 @@
 #' [0, 0], asserting the power is certainly zero. Wilson gives [0, 0.037], which is what 100
 #' simulations without a success actually supports.
 #'
-#' This matters beyond tidiness: `power_ci_low` is the column thresholded to certify a negative, so
-#' an interval that collapses at the boundary would certify claims the data cannot support.
+#' This matters beyond tidiness: `power_ci_low` is the column thresholded to establish a negative, so
+#' an interval that collapses at the boundary would support claims the data cannot.
 wilson_interval <- function(successes, n, conf_level = 0.95) {
   z <- stats::qnorm(1 - (1 - conf_level) / 2)
   phat <- successes / n

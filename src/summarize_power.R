@@ -221,7 +221,7 @@ for (i in seq_along(tables)) {
 #      min_detectable_effect_size_ci_high   from `power_ci_low`   conservative edge
 #
 #    For "this pair was powered well enough that a non-significant result means something", the
-#    conservative edge is the one to use: the smallest knockdown the data can *certify* the assay
+#    conservative edge is the one to use: the smallest knockdown the data can *establish* the assay
 #    would have caught. See docs/output.md.
 min_detectable <- function(columns) {
   values <- as.matrix(out[, columns, drop = FALSE])
@@ -248,7 +248,7 @@ if (have_intervals) {
   out$min_detectable_effect_size_ci_high <- min_detectable(ci_low_columns)
 } else {
   message("  note: no power_ci_low / power_ci_high columns in the inputs; ",
-          "reporting the point estimate only. A negative result cannot be certified from it.")
+          "reporting the point estimate only. A negative result cannot rest on it.")
 }
 
 out$max_effect_size_tested <- max(effect_sizes)
@@ -266,12 +266,12 @@ message(sprintf("  reaching power >= %.2f at some tested effect size: %d of %d (
                 opts$power_threshold, sum(!is.na(out$min_detectable_effect_size)), nrow(out),
                 100 * mean(!is.na(out$min_detectable_effect_size))))
 if (have_intervals) {
-  # The gap between these two is the cost of insisting on a certified negative rather than a
+  # The gap between these two is the cost of insisting on a well-powered negative rather than a
   # point-estimate one, and it is the number to quote when reporting how many pairs the analysis
   # can actually say anything about.
-  certified <- sum(!is.na(out$min_detectable_effect_size_ci_high))
-  message(sprintf("  certifiable (power_ci_low >= %.2f): %d of %d pairs (%.0f%%)",
-                  opts$power_threshold, certified, nrow(out), 100 * certified / nrow(out)))
+  n_powered <- sum(!is.na(out$min_detectable_effect_size_ci_high))
+  message(sprintf("  measured power >= %.2f (power_ci_low): %d of %d pairs (%.0f%%)",
+                  opts$power_threshold, n_powered, nrow(out), 100 * n_powered / nrow(out)))
   stricter <- sum(out$min_detectable_effect_size_ci_high > out$min_detectable_effect_size,
                   na.rm = TRUE)
   message(sprintf("  of those, %d land at a larger effect size than the point estimate suggests",

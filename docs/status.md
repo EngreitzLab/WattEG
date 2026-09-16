@@ -235,7 +235,7 @@ precise.
 Consequences below) puts the mean shift at **+0.0063**, not the ~0.026 this sample gave — the
 direction held, the size did not. The 2.64 % flip rate was measured on 5 simulations, where a single
 simulation crossing the threshold moves power by 0.2; at 100 simulations it is 0.8 percentage points
-of pairs crossing the certification line.
+of pairs crossing the 0.8 line.
 
 Note the coefficients themselves differ substantially — inherited theta median 20.0 against 18.8 from
 the null fit, median worst-coefficient difference 7.77 — while the p-values barely move. sceptre's
@@ -251,7 +251,7 @@ conditional-resampling test is far more robust to the null model than the null m
   | | `as_is` | `null_fit` |
   |---|---:|---:|
   | Mean power | 0.5933 | 0.5996 (**+0.0063**) |
-  | Certified (`power_ci_low` ≥ 0.8) | 13,094 (37.5 %) | 13,374 (**38.3 %**) |
+  | Measured power ≥ 0.8 (`power_ci_low`) | 13,094 (37.5 %) | 13,374 (**38.3 %**) |
   | Ambiguous | 4,382 (12.6 %) | 4,408 (12.6 %) |
   | Underpowered | 17,410 (49.9 %) | 17,104 (49.0 %) |
 
@@ -275,7 +275,7 @@ conditional-resampling test is far more robust to the null model than the null m
 
   Practical consequence: `null_fit` is the correct configuration and should stay the default, but
   **nothing built on the `as_is` numbers was materially wrong** — it moved 280 of 34,886 pairs across
-  the certification line, 0.8 percentage points. Keep both outputs.
+  the 0.8 line, 0.8 percentage points. Keep both outputs.
 - The pre-refactor pipeline inherited the same cache, so the **old-vs-new comparison is unaffected**:
   both sides share the bias. Compare them `as_is` against `as_is`.
 - Clearing the slot without supplying null fits gives `cleared`, at 4.3×. The two changes must land
@@ -572,7 +572,7 @@ Every process invocation is built on that pair.
 |---|---:|
 | Pairs matched | 34,886 |
 | Pairs whose **power** differs | **0** (max abs difference 0) |
-| Pairs whose **certification** flips | **0** |
+| Pairs that cross the **0.8 line** either way | **0** |
 
 That is the check that decides whether the two runners can be considered equivalent, and it passes
 on the deliverable rather than on an intermediate. Note the per-simulation p-values do still differ

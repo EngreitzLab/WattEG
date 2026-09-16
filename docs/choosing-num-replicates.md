@@ -109,7 +109,7 @@ Measured on all 34,886 pairs at effect size 0.15 and 100 simulations, the three 
 
 | | pairs | |
 |---|---:|---:|
-| certified well powered, `power_ci_low` ≥ 0.8 — a negative here is biological | 13,154 | 37.7 % |
+| measured power ≥ 0.8 (`power_ci_low`) — a negative here is biological | 13,154 | 37.7 % |
 | ambiguous, the interval contains 0.8 | 4,322 | 12.4 % |
 | clearly underpowered, `power_ci_high` < 0.8 — a negative here says nothing | 17,410 | 49.9 % |
 
