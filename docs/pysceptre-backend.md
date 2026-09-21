@@ -655,6 +655,48 @@ one stage with an absolute bar rather than a relative one.
 
 Phases 1–6 are done. Phase 7 is the one that decides whether `main` moves.
 
+## 11b. Running Stage B
+
+The reference is a power table the published sweep already produced, so no R is re-run.
+
+```sh
+# 1. export the object with BOTH flags (once per dataset)
+Rscript ../pysceptre/scripts/export_sceptre_dataset.R \
+    --sceptre-object <sceptre_object.rds> --out-dir export/ --all-genes --all-cells
+python  ../pysceptre/scripts/make_h5mu.py export/
+
+# 2. prepare
+watteg-prepare-sim-input --dataset export/dataset.h5mu --outdir prepared/ --n-jobs 8
+
+# 3. simulate the pairs to compare, at the REFERENCE's configuration
+watteg-run-power-simulation \
+    --prepared prepared/ --pairs <split>.tsv \
+    --effect-size 0.15 --reps 100 --seed 20250812 --n-jobs 8 \
+    --expression-model size_factor \
+    --out stageb_sim.tsv
+
+# 4. compare
+workflow/compare_stage_b.py stageb_sim.tsv \
+    ../WattEG-paper/power_sweep/day0/day0/power/power_es0.15.tsv \
+    --threshold-file prepared/discovery_threshold.txt
+```
+
+**`--expression-model size_factor` is not optional here.** The published sweeps predate the
+baseline change, and the default would measure the port and the baseline change together, then
+attribute the sum to whichever one was being questioned.
+
+**Cost, from the run's own timings**: `0.48s + 0.120s x pairs` per (target, replicate) at
+`--n-jobs 8`. A 36-target, 428-pair sample is about 1.9 h at 100 replicates and 23 min at 20.
+The whole sweep — 3,026 targets, 34,886 pairs — is roughly 130 h on one machine, which is what the
+cluster is for.
+
+**What the replicate count buys.** The per-pair test compares two binomial estimates, so its floor
+is `2*sqrt(p(1-p)/n_py + p(1-p)/n_r)` — at `p = 0.5` that is +/-0.32 with 20 Python replicates
+against the reference's 100, and +/-0.13 with 100. The *aggregate* test is far sharper either way:
+the shift in mean power over 428 pairs has a 2-se bound near 0.015 at 20 replicates. So a short run
+already tests the thing most likely to be wrong -- a systematic bias from the port -- and a long
+one is what makes the per-pair claim worth stating.
+
 ## 12. What is left, and what would be wrong to skip
 
 **The two that block a real sweep.**
