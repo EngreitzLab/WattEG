@@ -112,6 +112,20 @@ discovery analysis**, read from `@discovery_result`. Using the empirical thresho
 
 ## Why control-cell sampling is not used
 
+**The flags are gone.** `n_control_cells` and `cell_batches` were removed with the Python port:
+they bought speed at a measured 21–60 % of power, were off by default, and the port is the reason
+speed stopped being the binding constraint. A knob that trades power for speed you no longer need
+is a trap rather than an option. The measurement below is why, and is kept because the reasoning
+would otherwise have to be rediscovered by whoever proposes the optimisation next.
+
+**On dropping the batch stratification with it**, which is the part that sounds risky.
+`cell_batches` made the control draw keep the perturbed cells' batch composition, and without a
+draw there is nothing to stratify — the control group is every non-perturbed cell, so its
+composition is the dataset's. Batch is also conditioned on twice by the test itself: it is a
+covariate of the per-gene model, and of the logistic fit the CRT draws its synthetic treated sets
+from, so the null distribution is conditional on batch by construction. Cell-level matching is what
+you reach for when the model cannot adjust for a confounder.
+
 Using all non-perturbed cells as controls is expensive — a typical target has a few hundred
 perturbed cells against several hundred thousand controls, and every simulation simulates all of
 them. Sampling controls is the obvious optimisation, and it does not work.
