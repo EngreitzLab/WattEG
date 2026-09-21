@@ -8,10 +8,11 @@ two ways to produce it and they are not equivalent.
 null model gives that cell for that gene. Simulation and test then live on one
 scale by construction rather than by coincidence.
 
-**`size_factor`: `mean_i x sf_j`.** What the R implementation does -- a
-size-factor-normalised gene mean scaled by the cell's DESeq2 "poscounts" factor.
-Kept because the published sweeps were produced with it, and a comparison
-against them is only interpretable like for like. It is a validation fixture,
+**`size_factor`: `mean_i x sf_j`.** What the R implementation did until
+2026-09-21 -- a size-factor-normalised gene mean scaled by the cell's DESeq2
+"poscounts" factor. Kept because the sweeps already run were produced with it,
+and a comparison against one of those is only interpretable like for like. It is
+not what R does now: `r-implementation` defaults to the fitted baseline too. It is a validation fixture,
 not a modelling choice anyone should make afresh.
 
 ## Why the default changed

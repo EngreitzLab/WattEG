@@ -77,7 +77,7 @@ option_list <- list(
                            "scale. 'size_factor' uses mean_i * sf_j, which is what this pipeline",
                            "did before 2026-09-21; it mixes two models, runs about 4%% low and",
                            "reproduces only 86.5%% of the observed count variance against the",
-                           "fitted model's 99.5%%. Keep it only to reproduce published sweeps.",
+                           "fitted model's 99.5%%. Keep it only to reproduce sweeps run with it.",
                            "See baseline_expression() in lib/simulate.R.")),
   make_option("--guide-sd", type = "double", default = 0.13, dest = "guide_sd",
               help = paste("Standard deviation of the per-gRNA effect size around the target",

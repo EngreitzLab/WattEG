@@ -17,7 +17,7 @@ This document is a plan, not a record of work done. Nothing below has been imple
 | Repo | Branch | Rule |
 |---|---|---|
 | `WattEG` | **`feat/pysceptre-backend`** (created for this work) | `main` stays the R implementation until this branch merges |
-| `pysceptre` | **`0.1.1rc`** in `../pysceptre` | `pysceptre-paper` freezes pysceptre `main` for the same reason. The §5 export work was done on `feature/watteg-simulation-support` and squash-merged into `0.1.1rc` as **`d96d48f`**, alongside the analytical-power work; `main` is unchanged |
+| `pysceptre` | **`v0.2.0`** (tag) | The §5 export work was done on `feature/watteg-simulation-support`, squash-merged into `0.1.1rc` as **`d96d48f`** alongside the analytical-power work, and has since reached `main` and been tagged. `pixi.toml` pins the **tag**, not a SHA — the references to `d96d48f` below are the history, not the pin |
 | `WattEG` | **`r-implementation`** | the R pipeline, kept **maintained rather than frozen**. Branched from `main` at `7c07825` and since carrying the same three fixes this branch does (`d767af3`, `2b76284`, `b346296`) |
 | `WattEG` | `legacy` | untouched (the Snakemake implementation that preceded both) |
 
