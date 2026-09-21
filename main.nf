@@ -32,6 +32,14 @@ include { CONSOLIDATE_REPLICATES } from './modules/local/consolidate_replicates'
 include { COMPUTE_POWER     } from './modules/local/compute_power'
 include { SUMMARIZE_POWER   } from './modules/local/summarize_power'
 
+// A function, not a closure assigned with `def`: Nextflow 26.04's strict syntax does not see the
+// latter from inside a workflow body.
+def resolve(p) {
+    p.toString().startsWith('/') || p.toString().matches('(?i)^[a-z][a-z0-9+.-]*://.*')
+        ? file(p)
+        : file("${projectDir}/${p}")
+}
+
 workflow {
     main:
 
@@ -72,10 +80,6 @@ workflow {
     // A scheme-prefixed URI (gs://, s3://, az://) is absolute in the same sense a leading '/' is --
     // it already names a full location, not one relative to the repo. Without this check,
     // '${projectDir}/gs://bucket/obj' is nonsense and never exists.
-    def resolve = { p ->
-        p.toString().startsWith('/') || p.toString().matches('(?i)^[a-z][a-z0-9+.-]*://.*') ? file(p) : file("${projectDir}/${p}")
-    }
-
     // Emptiness is checked on the file, eagerly, rather than with .ifEmpty on the channel.
     // ifEmpty's closure is invoked while the DAG is being built, not when the channel turns out to
     // be empty, so `.ifEmpty { error ... }` aborts every run and -- worse -- reports the empty-
@@ -223,13 +227,6 @@ workflow {
     SUMMARIZE_POWER(ch_summary_in)
 }
 
-workflow.onComplete {
-    log.info(
-        """
-        ${workflow.success ? 'Completed' : 'FAILED'}: ${workflow.runName}
-          duration : ${workflow.duration}
-          outdir   : ${params.outdir}
-          command  : ${workflow.commandLine}
-        """.stripIndent()
-    )
-}
+// The `workflow.onComplete { ... }` summary that used to sit here is gone: Nextflow 26.04's strict
+// syntax rejects top-level statements, and everything it printed -- success, duration, outdir and
+// the command line -- Nextflow's own completion summary and `-with-report` already carry.

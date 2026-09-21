@@ -12,7 +12,7 @@
 process COMPUTE_POWER {
     tag "${meta.id} es${effect_size}"
 
-    publishDir "${params.outdir}/${meta.id}/power", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}/power" }, mode: params.publish_mode
 
     input:
     // One consolidated Parquet per effect size, from CONSOLIDATE_REPLICATES. Was 1,000 staged

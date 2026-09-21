@@ -12,7 +12,7 @@
 process SUMMARIZE_POWER {
     tag "${meta.id}"
 
-    publishDir "${params.outdir}/${meta.id}", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}" }, mode: params.publish_mode
 
     input:
     // One tuple, joined on meta upstream. Two separate input channels would be paired positionally

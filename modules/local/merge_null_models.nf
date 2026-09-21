@@ -10,7 +10,7 @@
 process MERGE_NULL_MODELS {
     tag "${meta.id}"
 
-    publishDir "${params.outdir}/${meta.id}/prepared", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}/prepared" }, mode: params.publish_mode
 
     input:
     tuple val(meta), path(chunks, stageAs: 'chunks/*')

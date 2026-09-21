@@ -16,7 +16,7 @@
 process CONSOLIDATE_REPLICATES {
     tag "${meta.id} es${effect_size}"
 
-    publishDir "${params.outdir}/${meta.id}/per_replicate", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}/per_replicate" }, mode: params.publish_mode
 
     input:
     tuple val(meta), val(effect_size), path(simulations, stageAs: 'sim/*')

@@ -11,7 +11,7 @@
 process PREPARE_SIM_INPUT {
     tag "${meta.id}"
 
-    publishDir "${params.outdir}/${meta.id}/prepared", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}/prepared" }, mode: params.publish_mode
 
     input:
     tuple val(meta), path(sceptre_object), path(response_odm)
