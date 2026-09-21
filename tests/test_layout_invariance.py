@@ -1,0 +1,104 @@
+"""A pair's power must not depend on how the work was split up.
+
+How many splits a cluster wanted and how many replicates fit in a task are
+operational choices. If either reached the numbers, two runs of the same sweep
+would disagree for reasons that have nothing to do with the screen, and no
+output would say so.
+
+    WATTEG_PREPARED=path/to/prepared pytest -m realdata
+
+Opt-in, because it needs a prepared dataset and runs the real engine. The
+seed-level half of the same contract is in `test_simulation_core.py` and runs
+everywhere; this is the end-to-end half, which is what would catch the contract
+being broken *downstream* of the seed -- by a per-task RNG, a shared generator,
+or anything that consumes draws in an order that depends on the chunking.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pandas as pd
+import pytest
+
+pytestmark = pytest.mark.realdata
+
+PREPARED = os.environ.get("WATTEG_PREPARED")
+KEY = ["grna_target", "response_id", "rep"]
+
+
+@pytest.fixture(scope="module")
+def prepared() -> Path:
+    if not PREPARED:
+        pytest.skip("set WATTEG_PREPARED to a watteg-prepare-sim-input output directory")
+    return Path(PREPARED)
+
+
+def simulate(prepared: Path, out: Path, split: Path, *, reps: int, offset: int, seed: int = 7):
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "watteg.cli.run_power_simulation",
+            "--prepared",
+            str(prepared),
+            "--pairs",
+            str(split),
+            "--effect-size",
+            "0.15",
+            "--reps",
+            str(reps),
+            "--rep-offset",
+            str(offset),
+            "--seed",
+            str(seed),
+            "--out",
+            str(out),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return pd.read_csv(out, sep="\t")
+
+
+@pytest.fixture(scope="module")
+def split(prepared: Path, tmp_path_factory) -> Path:
+    """One target's pairs, which is enough: the contract is per target."""
+    pairs = pd.read_csv(prepared / "pairs.tsv", sep="\t")
+    target = pairs["grna_target"].iloc[0]
+    path = tmp_path_factory.mktemp("split") / "split_01.tsv"
+    pairs[pairs["grna_target"] == target].to_csv(path, sep="\t", index=False)
+    return path
+
+
+def test_replicate_chunking_does_not_change_a_single_draw(prepared, split, tmp_path):
+    """Four replicates in one task against two tasks of two.
+
+    Byte-identical, not merely statistically similar: the four replicates are
+    keyed on (seed, target, rep, effect size) and nothing else, so the chunk
+    boundary has nowhere to enter.
+    """
+    one = simulate(prepared, tmp_path / "one.tsv", split, reps=4, offset=0)
+    first = simulate(prepared, tmp_path / "a.tsv", split, reps=2, offset=0)
+    second = simulate(prepared, tmp_path / "b.tsv", split, reps=2, offset=2)
+    two = pd.concat([first, second])
+
+    one = one.sort_values(KEY).reset_index(drop=True)
+    two = two.sort_values(KEY).reset_index(drop=True)
+    assert len(one) == len(two)
+    assert one.equals(two)
+
+
+def test_a_different_seed_does_change_the_draws(prepared, split, tmp_path):
+    """The companion to the test above: invariance must not come from the seed
+    being ignored."""
+    a = simulate(prepared, tmp_path / "s7.tsv", split, reps=2, offset=0, seed=7)
+    b = simulate(prepared, tmp_path / "s8.tsv", split, reps=2, offset=0, seed=8)
+    assert (
+        not a.sort_values(KEY)
+        .reset_index(drop=True)["p_value"]
+        .equals(b.sort_values(KEY).reset_index(drop=True)["p_value"])
+    )

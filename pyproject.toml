@@ -25,6 +25,12 @@ watteg-summarize-power = "watteg.cli.summarize_power:main"
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.5"]
 
+[tool.pytest.ini_options]
+markers = [
+    "realdata: needs a prepared dataset and runs the real engine; opt in with -m realdata",
+]
+addopts = "-m 'not realdata'"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
