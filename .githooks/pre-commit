@@ -12,6 +12,7 @@
 #   * any file larger than 512 KB
 #   * filenames that are not snake_case
 #   * camelCase / PascalCase identifiers in R code
+#   * ruff check and ruff format on Python, when ruff is on PATH
 #
 # Install:  pixi run install-hooks     (sets core.hooksPath to .githooks)
 # Lint all: pixi run lint              (same checks across the whole repo, read-only)
@@ -139,6 +140,27 @@ while IFS= read -r file; do
         fi
         rm -f "$scratch"
     fi
+
+    # --- Python lint and format ------------------------------------------------------------------
+    # ruff, not a bespoke regex. The R check below exists because nothing else was going to
+    # enforce R style; Python has a linter that already knows the rules, and the same one the
+    # project's `pixi run format` task uses, so the hook and the task cannot disagree.
+    #
+    # Read-only here even under --fix: ruff format rewrites whole files, and a hook that silently
+    # reformats what you are committing makes `git diff --cached` stop describing your change.
+    case "$file" in
+        *.py)
+            if command -v ruff >/dev/null 2>&1; then
+                if ! ruff check --quiet "$file"; then
+                    red "REJECT  $file fails ruff check"
+                    failures=$((failures + 1))
+                elif ! ruff format --check --quiet "$file" >/dev/null 2>&1; then
+                    red "REJECT  $file is not ruff-formatted; run 'pixi run -e dev format'"
+                    failures=$((failures + 1))
+                fi
+            fi
+            ;;
+    esac
 
     # --- R identifier convention ---------------------------------------------------------------
     # Flags camelCase and PascalCase assignments. Deliberately does not demand strict snake_case:
