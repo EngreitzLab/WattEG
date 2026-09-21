@@ -201,7 +201,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zarr-3.4.0-pyhc364b38_0.conda
       - pypi: ./
-      - pypi: git+https://github.com/broadinstitute/pysceptre.git?rev=594d5ff#594d5fffb4f96b49e40b6858268ebebaecbb6025
+      - pypi: git+https://github.com/broadinstitute/pysceptre.git?tag=v0.2.0#72b5e77a76a123afe80e5c55308d7883bd0927f4
       - pypi: https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/bioconda/noarch/nextflow-26.04.6-h2a3209d_1.conda
@@ -336,7 +336,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-1.3.2-h8088a28_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - pypi: ./
-      - pypi: git+https://github.com/broadinstitute/pysceptre.git?rev=594d5ff#594d5fffb4f96b49e40b6858268ebebaecbb6025
+      - pypi: git+https://github.com/broadinstitute/pysceptre.git?tag=v0.2.0#72b5e77a76a123afe80e5c55308d7883bd0927f4
       - pypi: https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl
   dev:
     channels:
@@ -535,7 +535,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zarr-3.4.0-pyhc364b38_0.conda
       - pypi: ./
-      - pypi: git+https://github.com/broadinstitute/pysceptre.git?rev=594d5ff#594d5fffb4f96b49e40b6858268ebebaecbb6025
+      - pypi: git+https://github.com/broadinstitute/pysceptre.git?tag=v0.2.0#72b5e77a76a123afe80e5c55308d7883bd0927f4
       - pypi: https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl
       osx-arm64:
       - conda: https://conda.anaconda.org/bioconda/noarch/nextflow-26.04.6-h2a3209d_1.conda
@@ -678,7 +678,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-1.3.2-h8088a28_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - pypi: ./
-      - pypi: git+https://github.com/broadinstitute/pysceptre.git?rev=594d5ff#594d5fffb4f96b49e40b6858268ebebaecbb6025
+      - pypi: git+https://github.com/broadinstitute/pysceptre.git?tag=v0.2.0#72b5e77a76a123afe80e5c55308d7883bd0927f4
       - pypi: https://files.pythonhosted.org/packages/43/3f/f88a53f60a472b46f4023f56d204dd7de33d34c5d2acbfa0d70a674e639e/threadpoolctl-3.7.0-py3-none-any.whl
 packages:
 - conda: https://conda.anaconda.org/bioconda/noarch/nextflow-26.04.6-h2a3209d_1.conda
@@ -5599,9 +5599,9 @@ packages:
   - pytest>=7 ; extra == 'dev'
   - ruff>=0.5 ; extra == 'dev'
   requires_python: '>=3.10'
-- pypi: git+https://github.com/broadinstitute/pysceptre.git?rev=594d5ff#594d5fffb4f96b49e40b6858268ebebaecbb6025
+- pypi: git+https://github.com/broadinstitute/pysceptre.git?tag=v0.2.0#72b5e77a76a123afe80e5c55308d7883bd0927f4
   name: pysceptre
-  version: 0.2.0rc1
+  version: 0.2.0
   requires_dist:
   - numpy>=1.24
   - scipy>=1.10
