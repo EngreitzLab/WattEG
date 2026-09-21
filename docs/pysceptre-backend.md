@@ -221,9 +221,27 @@ pysceptre's analytical power estimator hit this first, and its
 normalisation scheme sceptre does not use, and on day0 it sits about 16 % below the mean sceptre's
 own model implies", with `baseline_expression_stats_from_fits` recommended instead.
 
-**PerturbPlan is not doing anything wrong.** It takes `expression_mean` as an input. What is wrong
-is feeding it the poscounts normalised mean, and the two tools differ only in how far that input
-travels:
+**PerturbPlan is not doing anything wrong, and its source says so twice.** `compute_power_posthoc`
+does not compute `expression_mean`; it takes `baseline_expression_stats` as an argument, and the
+documentation defines it only as "a data frame ... with columns `response_id`, `expression_mean`,
+and `expression_size`" — **it never states the scale.** The formula does, in two independent
+places: `compute_distribution_teststat` uses `var_nb(mean, size) = mean + mean^2/size`, the
+variance of the negative binomial the *observed counts* follow; and `compute_QC` takes
+`P(count == 0)` from that same NB and feeds it to
+`pbinom(n_nonzero_thresh - 1, num_cells, 1 - P0)` — the chance that enough cells have a nonzero
+**raw count** to clear pairwise QC. The second settles it: only a distribution over actual counts
+has a zero probability to ask about. So `expression_mean` must be E[observed count per cell], and
+the defect is entirely in the input.
+
+**And the wrong scale costs more there than the flat 16 % suggests, because it is counted twice.**
+Measured on day0, the normalised mean overstates `P(count == 0)` by 0.032 at the median and 0.073
+at most (0.304 against 0.247). That inflates `QC_prob`, and power is multiplied by
+`1 - QC_prob`: at the median target's 396 treated cells, **28 of 237 genes carry an inflated
+`QC_prob`, the worst by 0.20** — a fifth of that gene's power disappearing into a QC term, on top
+of the separate understatement through the test statistic.
+
+What is wrong, then, is feeding it the poscounts normalised mean, and the two tools differ only in
+how far that input travels:
 
 | | vs the mean sceptre's model implies |
 |---|---|
