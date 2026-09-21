@@ -139,6 +139,12 @@ def simulate_target(
             side_code=params.side_code,
             seed=int(rng.integers(0, 2**31 - 1)),
             n_jobs=n_jobs,
+            # Stated rather than left to be discovered. Each call carries exactly one target, so
+            # the default of 200 is reduced to 1 by the memory budget every single time -- and
+            # that reduction warns, six lines per call, which is 21,600 lines for a 36-target
+            # 100-replicate run. Saying 1 here is not a tuning choice: it is what the value
+            # already was. Chunk size affects only batching width, never a result.
+            target_chunk_size=1,
         )
         result = result.assign(rep=rep, effect_size=effect_size, num_pert_cells=n_perturbed)
         out.append(result)
