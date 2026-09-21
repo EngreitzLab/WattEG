@@ -645,8 +645,37 @@ one stage with an absolute bar rather than a relative one.
    container and the resource recalibration.** The `conf/*.config` memory closures were tuned
    around R's 2.27 GB median and must be re-measured, not carried over — the Python footprint is a
    different function of the cell count and the gene count.
-7. **Stage B/C/D validation** at full scale on one effect size.
-8. **Docs**: `usage.md`, `methods.md` and `status.md` rewritten for the Python path; the R path
-   documented as the reference implementation it has become.
+7. **Stage B/C/D validation** at full scale on one effect size. **Stage D is done** — four
+   replicates in one task against two tasks of two are byte-identical, and a different seed does
+   change the draws, so the invariance is not coming from the seed being ignored. It runs behind
+   `-m realdata`. **Stages 0, B and C need a cluster sweep** and are the outstanding work.
+8. **Docs** — `README.md` and a pointer on `status.md` are done. `usage.md`, `methods.md` and
+   `output.md` still describe the R path.
 
-Phases 1–4 are the work; 5–6 are mechanical; 7 is the one that decides whether `main` moves.
+Phases 1–6 are done. Phase 7 is the one that decides whether `main` moves.
+
+## 12. What is left, and what would be wrong to skip
+
+**The two that block a real sweep.**
+
+- **Resource recalibration.** `conf/base.config`'s numbers are R's, now labelled as such rather
+  than left looking calibrated. A task uses `task.cpus` workers where R's used one, so both the
+  memory and the time models are a different shape. They err high, which wastes budget rather than
+  losing runs, but they are not a calibration until a real trace replaces them.
+- **A container for the `gcb` profile.** The R image is not reusable and nothing has been built.
+
+**The one that decides whether this replaces the R path.** Stage B at full scale: one effect size,
+100 replicates, all 34,886 pairs, against `power_sweep/`. Everything measured so far says the two
+agree — but on one target, eight pairs, forty replicates. That is evidence the paths agree where
+they have been compared, and it is not the same claim.
+
+**Three scientific questions are open and recorded, none of them acted on** (§3.2b, §3.2c, §5.2).
+The largest, simulating from `exp(X . beta)`, has been taken; the other two are judgement calls
+about which cells and which estimator belong, and both change every published number.
+
+**One thing deliberately not ported.** `fit_power_curve.R` serves the paper's reduced-design study
+rather than the pipeline, and nothing in the DAG calls it. It stays in R.
+
+**The synthetic fixture.** `src/make_test_data.R` produces a sceptre object; the Python path needs
+a `.h5mu`, so `assets/samplesheet_synthetic.csv` points at a file nothing generates yet. The stub
+run works from a real export instead.
