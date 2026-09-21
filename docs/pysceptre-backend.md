@@ -429,7 +429,9 @@ one stage with an absolute bar rather than a relative one.
    `feature/watteg-simulation-support`. *Gate passed:* all 3,071 day0 targets reproduce exactly,
    asserted at export time rather than in a test that can be skipped; the default read of an
    `--all-cells` export is identical to a plain one on the real screen; 230 tests green, with the
-   export-format contract covered by 10 new ones that need neither R nor a real dataset.
+   export-format contract covered by 10 new ones that need neither R nor a real dataset; and
+   `test_day0_regression` passes 6/6 against a re-export of day0 (4 min, 34,886 pairs), so the
+   export changes move nothing the engine reads.
 2. **`prepare_sim_input` in Python** against the fixture: size factors, normalised means, theta,
    threshold, pairs — each compared to the R output column by column. *Gate: §3.2.*
 3. **Benchmark before committing to the shape.** 3 targets x 100 simulations on the fixture, timing
