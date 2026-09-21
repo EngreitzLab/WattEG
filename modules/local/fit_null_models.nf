@@ -40,6 +40,7 @@ process FIT_NULL_MODELS {
             --reps ${reps} \\
             --rep-offset ${rep_offset} \\
             --seed ${params.seed} \\
+            --expression-model ${params.expression_model} \\
             --out ${chunk}
     """
 

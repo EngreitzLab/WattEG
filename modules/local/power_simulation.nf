@@ -58,6 +58,7 @@ process POWER_SIMULATION {
             --rep-offset ${rep_offset} \\
             --guide-sd ${params.guide_sd} \\
             --seed ${params.seed} \\
+            --expression-model ${params.expression_model} \\
             --out ${out_name}
 
     # A short file means simulation rows were lost, which compute_power.R would otherwise absorb as
