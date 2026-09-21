@@ -284,7 +284,13 @@ reproduced is untouched.
 signed, for the reason in §3.2b. Every number here is day0; the mechanism is general but the
 magnitudes are not. And the R implementation is unchanged, so the published sweeps remain on the
 old baseline — re-running them is a separate, all-or-nothing decision, since mixing the two scales
-within one analysis would be worse than either alone.
+within one analysis would be worse than either alone. What that decision costs, concretely: every
+`power_summary.tsv` moves — `day0` at six effect sizes, `moi5` cis at six, and the 742,525-pair
+`moi5` trans sweep at one.
+
+Both per-gene means survive the change on purpose. `sim_input.h5` carries `fitted_coefs` *and*
+`mean`, so an existing output can be audited against the scale that produced it without
+re-deriving anything, and `--expression-model size_factor` reproduces it exactly.
 
 ### 3.3 Seeding contract is preserved
 
