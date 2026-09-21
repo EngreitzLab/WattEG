@@ -7,23 +7,29 @@ nav_order: 6
 
 ## Environment
 
-[pixi](https://pixi.sh) manages everything except sceptre.
+[pixi](https://pixi.sh) manages everything.
 
 ```sh
-pixi install          # runtime environment from pixi.lock
-pixi run setup        # install sceptre from the pinned commit
-pixi run check-api    # verify the pin against the internals this pipeline uses
-pixi run lint         # formatting and convention checks (read-only)
+pixi install              # the environment, from pixi.lock
+pixi run -e dev test      # the fast tests
+pixi run -e dev format    # ruff format + ruff check --fix
+pixi run pipeline-test    # a stub run of the Nextflow DAG
+pixi run lint             # the pre-commit checks, read-only
 pixi run install-hooks
 ```
 
-Three environments, so the one every task activates stays small:
+Two environments: `default`, which every task activates, and `dev`, which adds pytest and ruff.
 
-| Environment | Contains | Why separate |
-|---|---|---|
-| default | `r-base`, `r-optparse`, `nextflow`, and the packages sceptre reaches on our code path (`r-matrix`, `r-rcpp`, `r-dplyr`, `r-data.table`, `r-purrr`, `r-crayon`, `r-parallelly`, `r-withr`) | activated by every task |
-| `build` | `r-remotes`, compilers, `r-ggplot2`, `r-cowplot`, `r-scales`, `r-bh` | only needed to compile sceptre |
-| `dev` | `r-testthat` | only needed to run tests |
+**There is no longer a `build` environment, a `setup` task or a `check-api` task.** Those existed
+because sceptre was installed from a pinned commit with a local patch and compiled C++, ondisc from
+another pinned commit, and the pipeline read several of sceptre's unexported S4 slots so the pin had
+to be verified against them. None of that survives the Python port: pysceptre is a wheel built from
+a git dependency pinned to a commit, the pipeline calls its documented entry points, and a version
+bump is caught by this repository's own tests rather than by a bespoke checker.
+
+The sections below describe the R implementation, which still exists in `src/*.R` and `lib/*.R` and
+is the reference the Python path was validated against. The environment that ran it is on the
+`legacy` branch.
 
 ### Why `ggplot2` is a build-only dependency
 
