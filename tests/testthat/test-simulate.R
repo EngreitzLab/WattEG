@@ -199,3 +199,42 @@ test_that("build_fitted_coefs_matrix reads the other half of the same fit", {
   precomps$g2$fitted_coefs <- c(0.3, NA)
   expect_error(build_fitted_coefs_matrix(precomps, c("g1", "g2")), "non-finite fitted coefficient")
 })
+
+test_that("centring must be applied after the columns are put back in cell order", {
+  # The bug this guards against ran silently for the whole life of the R pipeline.
+  # create_effect_size_matrix() returns columns in perturbed-then-control order, while
+  # `pert_status` is in cell order. Centring before the reorder selects the right NUMBER of
+  # columns and the wrong ones, so it does not error -- it just does not centre.
+  #
+  # The symptom is not bias but VARIANCE: the realised effect size stops being the requested one
+  # on every replicate and starts varying by the per-guide draw, which inflates the
+  # replicate-to-replicate spread of the fold change and pulls every pair's power toward 0.5.
+  set.seed(99)
+  n_cells <- 400; n_pert <- 60; n_guides <- 12; n_ctrl <- 40
+  pert_status <- integer(n_cells)
+  pert_status[sort(sample(n_cells, n_pert))] <- 1L
+  restore <- order(cell_order(pert_status))
+  gene_es <- c(0.85)
+
+  realised <- replicate(50, {
+    st <- c(sample(seq_len(n_guides), n_pert, replace = TRUE),
+            sample(seq_len(n_ctrl), n_cells - n_pert, replace = TRUE) + n_guides)
+    es <- create_effect_size_matrix(st, seq_len(n_guides), gene_es, guide_sd = 0.13)
+    es <- es[, restore, drop = FALSE]
+    es <- center_effect_size_matrix(es, pert_status, gene_es)
+    mean(es[1, pert_status == 1])
+  })
+
+  # Every draw, exactly: that is what centring is for.
+  expect_equal(realised, rep(gene_es, 50), tolerance = 1e-12)
+
+  # And the order it is done in is what makes that true, so check the other order fails.
+  wrong <- replicate(50, {
+    st <- c(sample(seq_len(n_guides), n_pert, replace = TRUE),
+            sample(seq_len(n_ctrl), n_cells - n_pert, replace = TRUE) + n_guides)
+    es <- create_effect_size_matrix(st, seq_len(n_guides), gene_es, guide_sd = 0.13)
+    es <- center_effect_size_matrix(es, pert_status, gene_es)
+    mean(es[, restore, drop = FALSE][1, pert_status == 1])
+  })
+  expect_gt(sd(wrong), 0.01)
+})

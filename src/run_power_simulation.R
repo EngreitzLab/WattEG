@@ -377,9 +377,22 @@ for (target in targets) {
 
     es_mat <- create_effect_size_matrix(grna_pert_status, pert_guides = pert_guides,
                                         gene_effect_sizes = effect_sizes, guide_sd = opts$guide_sd)
+    # REORDER BEFORE CENTRING, not after. create_effect_size_matrix() returns columns in
+    # perturbed-then-control order -- the order create_guide_pert_status() built the status vector
+    # in -- while `pert_status` is in cell order. Centring first therefore applied
+    # `pert_status == 1` to a matrix whose columns were not cells in that order: it selected the
+    # right NUMBER of columns, so it ran silently, and centred the wrong ones.
+    #
+    # The consequence was not a small one. Centring exists to make the realised effect size equal
+    # the requested one on every replicate; applied to the wrong columns it does not, and the
+    # realised knockdown varies from replicate to replicate by the per-guide draw. Measured over
+    # 300 draws at guide_sd = 0.13 with 12 guides: mean 0.845 and sd 0.036 against a target of
+    # 0.85 and a required sd of 0. That extra variance inflates the replicate-to-replicate spread
+    # of the fold change by about 38%, which pulls every pair's power toward 0.5 -- understating
+    # it for well-powered pairs and overstating it for weak ones.
+    es_mat <- es_mat[, restore_cell_order, drop = FALSE]
     es_mat <- center_effect_size_matrix(es_mat, pert_status = pert_status,
                                        gene_effect_sizes = effect_sizes)
-    es_mat <- es_mat[, restore_cell_order, drop = FALSE]
 
     counts <- draw_counts(gene_object, es_mat, baseline)
 
