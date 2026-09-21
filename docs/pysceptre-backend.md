@@ -418,14 +418,44 @@ one stage with an absolute bar rather than a relative one.
   low-MOI object must fail at `prepare_sim_input` with a clear message naming the R path, not
   silently produce numbers from the wrong control group. The check reads `control_group_complement`
   and `run_permutations` out of the export metadata.
-- **`--n-control-cells` / `--cell-batches`.** Measured to cost 21–60 % of power and off by default;
-  recommend not porting, and deleting the flags rather than carrying dead paths. Your call — say so
-  if they should survive. **Phase 2 has already acted on the recommendation**: R's `col_data`
-  carries `batch_factor` and `replicate_factor`, and `sim_input.h5` carries neither, since
-  `--cell-batches` is the only thing that reads them. They are recoverable without touching the
-  export if that changes — the design matrix holds them one-hot (`batch_factorBatch 2/3/4` plus an
-  all-zero reference level), so reconstructing the factor is about fifteen lines, and the container
-  already stores categoricals as codes plus levels for exactly this.
+- **`--n-control-cells` and `--cell-batches`. Decided: neither is ported.**
+
+  `--n-control-cells` draws a fixed number of control cells per target instead of using every
+  non-perturbed cell — on day0, 5,000 in place of ~567,000. It is a cost lever and nothing else,
+  and it was measured to cost **21–60 % of power**. `--cell-batches` stratifies that draw so the
+  sampled controls keep the perturbed cells' batch composition; it does nothing on its own, and
+  `run_power_simulation.R` refuses it without `--n-control-cells`.
+
+  The question worth answering, because it is the one that sounds alarming: **does dropping
+  `--cell-batches` expose the analysis to batch drift between the two arms?** No, for two reasons.
+
+  1. With no subsampling there is no draw to stratify. The control group is every non-perturbed
+     cell, so its batch composition is the dataset's, not a sampling artefact.
+  2. Batch is conditioned on by the test itself, twice. `batch_factorBatch 2/3/4` and
+     `replicate_factorRep 2/3/4` are columns of the covariate matrix, and that matrix enters both
+     the per-gene NB fit — so batch effects on expression are adjusted out — and the logistic fit
+     of perturbation status that the **CRT draws its synthetic treated sets from**. The null
+     distribution is therefore conditional on batch by construction. That is the formal guarantee,
+     and it is why this method does not need matched control cells: cell-level matching is what
+     you reach for when the model cannot adjust for a confounder, and here it can.
+
+  Stratified sampling was never the defence against batch confounding. It was a patch for the
+  extra variance that careless subsampling adds on top of a model already handling it.
+
+  The case against porting is stronger here than it was in R: the lever exists to buy speed, the
+  port is the reason speed stops being the binding constraint, and a knob that trades power for
+  speed you no longer need is a trap rather than an option. **`perturbation.py` should not grow a
+  control-sampling path**, and `sim_input.h5` carries no `batch_factor` or `replicate_factor`,
+  since `--cell-batches` was the only reader.
+
+  **If control subsampling ever returns** — a screen large enough that even the Python path cannot
+  afford the full control set — stratification has to return with it, and the reasoning above is
+  why. That costs no format change: the design matrix holds both factors one-hot (`batch_factorBatch
+  2/3/4` plus an all-zero reference level), so each is reconstructible in about fifteen lines, and
+  `sim_input` already stores categoricals as codes plus levels for exactly this.
+
+  The R implementation keeps both flags. It is the reference the paper describes, and removing
+  options from it would change what that reference is.
 - **`run_permutations = TRUE` screens.** pysceptre supports permutations, but its draws are sized by
   the largest target in the run, which interacts badly with per-target calls. Refuse for now.
 
