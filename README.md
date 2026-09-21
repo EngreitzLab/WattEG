@@ -1,7 +1,8 @@
 # WattEG
 
 **W**atts for **E**lement–**G**ene pairs: power analysis for element–gene pairs in single-cell
-CRISPR screens, built on [sceptre](https://katsevich-lab.github.io/sceptre/).
+CRISPR screens, built on [pysceptre](https://github.com/broadinstitute/pysceptre) — a Python port
+of [sceptre](https://katsevich-lab.github.io/sceptre/)'s statistical engine.
 
 **📖 [Documentation](https://engreitzlab.github.io/WattEG/)**
 
@@ -22,67 +23,78 @@ written for one specific analysis. This repository generalises it.
 
 ```sh
 pixi install
-pixi run setup       # installs sceptre from a pinned commit
-pixi run check-api   # verifies that pin against the internals the pipeline uses
 ```
 
-sceptre is not on conda-forge or bioconda, so it is installed from a pinned commit rather than
-captured in `pixi.lock`. The pipeline reads several of its unexported S4 slots, which is why the
-version is pinned and checked.
+That is the whole of it. The environment is one Python package plus Nextflow: no R, no pinned
+sceptre commit, no patch applied to it, and no separate install step. pysceptre enters as a git
+dependency pinned to a commit, because a sweep has to be re-runnable against the engine that
+produced it.
+
+**The R implementation has not been deleted.** It is the reference the Python path was validated
+against and what the methods paper describes, and it still lives in `src/*.R` and `lib/*.R`. What
+is gone is the environment that ran it; to use it, take the `pixi.toml` from the `legacy` branch.
 
 ## Input
 
-**One file: a sceptre object** (`.rds`) on which `assign_grnas()` and `run_qc()` have been called,
-using `grna_integration_strategy = "union"`.
+**One file: a `.h5mu` dataset** exported from a sceptre object on which `assign_grnas()` and
+`run_qc()` have been called, using `grna_integration_strategy = "union"`.
 
 Everything else is derived from it — the discovery pairs, the gRNA-to-target mapping and the
-significance threshold all already live inside the object.
+significance threshold all travel with the export.
 
-If the object's response matrix is odm-backed (out-of-core), pass `--response-odm` on
-`prepare_sim_input.R` with the path to the backing `.odm` file — see [Usage](https://engreitzlab.github.io/WattEG/usage/).
+Making one is a one-off step per dataset, run wherever R and sceptre are available. It is the only
+place R appears at all, and it is not part of the pipeline:
+
+```sh
+Rscript pysceptre/scripts/export_sceptre_dataset.R \
+  --sceptre-object results/sample1/sceptre_object.rds \
+  --out-dir export/ --all-genes --all-cells
+python  pysceptre/scripts/make_h5mu.py export/
+```
+
+**`--all-cells` is required, not optional.** DESeq2 "poscounts" size factors are a per-cell
+reduction against a per-gene geometric mean taken over every cell in the object, so an export
+restricted to the QC-passing cells gives different size factors for the cells that remain. The
+export handles odm-backed (out-of-core) matrices itself, which is why there is no longer an
+`--response-odm` flag anywhere in the pipeline.
 
 List your samples in a CSV (see `assets/samplesheet.csv`):
 
 ```csv
-sample,sceptre_object
-sample1,results/sample1/sceptre_object.rds
+sample,dataset
+sample1,export/dataset.h5mu
 ```
-
-Add an optional `response_odm` column (see `assets/samplesheet_seqera_test.csv`) for any sample whose
-sceptre object's response matrix is odm-backed — same file `prepare_sim_input.R --response-odm` takes
-standalone. Leave it blank, or omit the column entirely, for in-memory-backed objects.
 
 ## Quickstart
 
-Each step is a standalone executable in `src/` with `--help`.
+```sh
+nextflow run . -profile sherlock -params-file config/config.yml
+```
+
+Each step is also a console script with `--help`, so a sweep can be driven by hand or by another
+runner:
 
 ```sh
 # derive the simulation inputs (once per sample)
-Rscript src/prepare_sim_input.R \
-  --sceptre-object results/sample1/sceptre_object.rds \
-  --outdir prepared/
+watteg-prepare-sim-input --dataset export/dataset.h5mu --outdir prepared/
 
 # split targets into per-task chunks
-Rscript src/split_pairs.R --pairs prepared/pairs.tsv --n-splits 280 --outdir splits/
+watteg-split-pairs --pairs prepared/pairs.tsv --n-splits 280 --outdir splits/
 
 # simulate (once per split x effect size)
-Rscript src/run_power_simulation.R \
-  --sim-input prepared/sim_input.rds \
-  --sceptre-template prepared/sceptre_template.rds \
-  --pairs splits/split_001.tsv \
-  --grna-targets prepared/grna_targets.tsv \
+watteg-run-power-simulation \
+  --prepared prepared/ --pairs splits/split_001.tsv \
   --effect-size 0.15 --reps 100 --seed 20250812 \
   --out sim/split_001_es0.15.tsv
 
 # power per pair, then one table across effect sizes
-Rscript src/compute_power.R \
-  --simulations "$(ls sim/*_es0.15.tsv | paste -sd, -)" \
-  --threshold-file prepared/discovery_threshold.txt \
+watteg-compute-power \
+  --simulations sim/ --threshold-file prepared/discovery_threshold.txt \
   --out power_es0.15.tsv
 
-Rscript src/summarize_power.R \
-  --power power_es0.15.tsv,power_es0.2.tsv \
-  --out power_summary.tsv
+watteg-summarize-power \
+  --power power_es0.15.tsv power_es0.2.tsv \
+  --sim-input prepared/sim_input.h5 --out power_summary.tsv
 ```
 
 Parameters live in `config/config.yml`.

@@ -5,6 +5,27 @@ nav_order: 7
 
 # Status and handoff
 
+> **The pipeline now runs on Python, and most of this document describes the R implementation it
+> replaced.** The port is recorded in
+> [Plan - pysceptre backend]({{ site.baseurl }}{% link pysceptre-backend.md %}), which is the
+> current account of what runs, what was measured and what is still open. Read this one for the R
+> path's history, its measured numbers and the correctness fixes that produced them — all of which
+> remain true of the R implementation, which still exists and is the reference the Python path was
+> validated against.
+>
+> What changed that this document would otherwise mislead about:
+>
+> - **`FIT_NULL_MODELS` and `MERGE_NULL_MODELS` are gone.** The whole "which per-gene null model
+>   does the simulation test against" section below settled on `null_fit`, a hoist that existed
+>   because R refitting inside every call cost 4.3x. The Python path does that refit as a matter of
+>   course, so the hoist has nothing to buy.
+> - **The simulation draws from `exp(X . beta)`, sceptre's own null model**, not from a
+>   size-factor-normalised mean. Every power number below predates that change.
+> - **The input is a `.h5mu`, not a sceptre object**, and the environment holds no R.
+> - **The cost model and the resource calibrations below are R's.** They are not valid for the
+>   Python path and have not yet been replaced.
+
+
 State of the refactor, written so the work can be picked up by someone else.
 
 **Short version:** the five pipeline steps are complete, run standalone, and have now run on
