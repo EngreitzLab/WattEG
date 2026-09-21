@@ -18,6 +18,7 @@ so downstream readers do not care which produced them:
 
     sim_input.h5              per-gene and per-cell statistics + the perturbation matrices
     pairs.tsv                 the QC-passing discovery pairs
+    pairs_with_info.tsv       every discovery pair with its real-data QC counts
     grna_targets.tsv          the gRNA -> target mapping
     discovery_threshold.txt   the nominal p-value a simulated pair has to beat
     analysis_mode.tsv         which test the screen was run under
@@ -234,6 +235,22 @@ def main(argv: list[str] | None = None) -> int:
     # disagree with the screen's own design table for no gain.
     in_use.grna_target_data_frame.to_csv(args.outdir / "grna_targets.tsv", sep="\t", index=False)
 
+    # n_nonzero_trt, n_nonzero_cntrl and pass_qc, which the simulation reports beside each
+    # pair. They are facts about the REAL data and constant across replicates, so they are
+    # carried rather than recomputed per draw -- which is also what the R implementation does,
+    # reading them off the sceptre template's discovery_pairs_with_info. They are the first
+    # thing anyone looks at when a pair's power is surprising, and there is nowhere else to
+    # recover them from once the object is gone.
+    if in_use.discovery_pairs_with_info is not None:
+        in_use.discovery_pairs_with_info.to_csv(
+            args.outdir / "pairs_with_info.tsv", sep="\t", index=False
+        )
+    else:
+        print(
+            "  NOTE: the export carries no discovery_pairs_with_info, so pairs_with_info.tsv is "
+            "not written and the simulation will have no QC counts to report."
+        )
+
     threshold = args.threshold or discovery_threshold(in_use.discovery_result)
     (args.outdir / "discovery_threshold.txt").write_text(f"{threshold:.17g}\n")
 
@@ -257,7 +274,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  discovery threshold: {threshold:.6g}")
     print(f"  resampling: {mechanism} (MOI: {moi}, side: {export.side})")
-    print(f"\nwrote 5 files to {args.outdir}")
+    written = len(list(args.outdir.glob("*")))
+    print(f"\nwrote {written} files to {args.outdir}")
     return 0
 
 
