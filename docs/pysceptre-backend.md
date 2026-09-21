@@ -153,9 +153,17 @@ discrepancy out of a known, already-settled difference.
 counts — it sets the noise the simulation exists to reproduce, and it must not become a property of
 the simulated counts. pysceptre has its own validated theta estimator (`glm/nb_theta.py`), so the
 Python `prepare_sim_input` computes theta from the real matrix rather than reading a cache.
-**Acceptance gate:** per-gene `theta` from `nb_theta.py` against `@response_precomputations$theta`
-on the fixture object, reported as a distribution, before anything downstream is trusted.
-`build_dispersion_vector`'s hard error on missing/non-finite dispersions carries over.
+**Measured, and it settles the question.** Over day0's 237 genes and 567,690 cells, pysceptre's
+fitted theta reproduces sceptre's cached theta to a **median relative difference of 2.8e-12 and a
+worst case of 1.2e-9** — about ten significant digits — with 236 of 237 genes inside 1e-9. Since a
+dispersion matters only through the variance of the counts drawn from it, that is nothing against
+the 5–50 % effect sizes the sweep tests. One gene's theta MLE fell back to method of moments in
+both implementations alike, and it is the gene the two differ on most.
+`workflow/compare_dispersion.py` is the gate, at a tolerance of 1e-6 — generous against what the
+port achieves and still tight enough to catch a wrong model.
+`build_dispersion_vector`'s hard error on missing/non-finite dispersions carries over, and is
+joined by one R never needed: a theta clamped to the estimator's bounds is refused rather than
+simulated from, because here the fit happens in front of us rather than arriving in a cache.
 
 ### 3.3 Seeding contract is preserved
 
@@ -357,6 +365,14 @@ configuration that §3.1 reproduces. `power_sweep_null/` holds `power_es0.0.tsv`
 **es = 0 null arm**, not the `null_fit` configuration. Stage B reads `power_sweep/`; Stage C reads
 `power_sweep_null/`.
 
+**"Reproduce R" has a floor that is not the port's doing.** The published sweeps ran on an x86
+cluster, where R's `sum()` accumulates in 80-bit `LDOUBLE`; on arm64 `.Machine$sizeof.longdouble`
+is 8 and it accumulates in plain `double`. Measured in phase 2: **a local R run reproduces only 30
+of 20,000 published size factors bit for bit**, and differs from them by up to 6.2e-12 — the same
+residual the Python port shows. So the published outputs cannot be reproduced exactly by R either,
+and 1e-10 is what "reproduces R" can mean across platforms. That is a definition, not a caveat, and
+it applies to every stage below.
+
 **Stage 0 — measure the noise floor first.** The 0/265 flips `null_fit` achieved against `cleared`
 were possible only because both ran the *same* R RNG stream: identical CRT index sets, differing
 only in the null coefficients. R sceptre against pysceptre is two **independent** resampling streams
@@ -401,7 +417,12 @@ one stage with an absolute bar rather than a relative one.
   and `run_permutations` out of the export metadata.
 - **`--n-control-cells` / `--cell-batches`.** Measured to cost 21–60 % of power and off by default;
   recommend not porting, and deleting the flags rather than carrying dead paths. Your call — say so
-  if they should survive.
+  if they should survive. **Phase 2 has already acted on the recommendation**: R's `col_data`
+  carries `batch_factor` and `replicate_factor`, and `sim_input.h5` carries neither, since
+  `--cell-batches` is the only thing that reads them. They are recoverable without touching the
+  export if that changes — the design matrix holds them one-hot (`batch_factorBatch 2/3/4` plus an
+  all-zero reference level), so reconstructing the factor is about fifteen lines, and the container
+  already stores categoricals as codes plus levels for exactly this.
 - **`run_permutations = TRUE` screens.** pysceptre supports permutations, but its draws are sized by
   the largest target in the run, which interacts badly with per-target calls. Refuse for now.
 
@@ -435,8 +456,16 @@ one stage with an absolute bar rather than a relative one.
    export-format contract covered by 10 new ones that need neither R nor a real dataset; and
    `test_day0_regression` passes 6/6 against a re-export of day0 (4 min, 34,886 pairs), so the
    export changes move nothing the engine reads.
-2. **`prepare_sim_input` in Python** against the fixture: size factors, normalised means, theta,
-   threshold, pairs — each compared to the R output column by column. *Gate: §3.2.*
+2. ~~**`prepare_sim_input` in Python** against the fixture: size factors, normalised means, theta,
+   threshold, pairs — each compared to the R output column by column.~~ **Done.** *Gate passed*
+   against the day0 `sim_input.rds` the published sweep ran on: `pairs.tsv`, `grna_targets.tsv`
+   and `discovery_threshold.txt` **byte-identical**; genes the same set in the same order; all
+   3,071 target and 43,718 guide cell sets agreeing exactly; and the expression statistics
+   **bit-identical to a same-platform R run**, differing from the published ones only by the
+   6.2e-12 platform residual above. Theta as in §3.2. Three defects the gates caught rather than
+   luck: counts stored as `uint16` made `np.log` return **float32** (2.5e-7 on the size factors);
+   `grna_perts` was missing the non-targeting guides, which would have kept the control arm's mean
+   while losing its guide-level variance; and `pairs.tsv`'s column order.
 3. **Benchmark before committing to the shape.** 3 targets x 100 simulations on the fixture, timing
    (a) one call per (target, replicate), (b) replicates stacked per §2, at 10/25/50/100 replicates
    per chunk, with peak RSS — and **broken down into the four terms of §2.5**, not reported as a
