@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 watteg-prepare-sim-input = "watteg.cli.prepare_sim_input:main"
+watteg-run-power-simulation = "watteg.cli.run_power_simulation:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.5"]
