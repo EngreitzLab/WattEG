@@ -214,6 +214,48 @@ from, with an exact alternative available. If it is taken, it is a one-line chan
 `watteg/expression.py` and a corresponding one in `src/prepare_sim_input.R`, and both sweeps
 have to be re-run.
 
+### 3.2c The same question on the analytical side, and what it suggests
+
+pysceptre's analytical power estimator hit this first, and its
+`analytical_power/inputs.py` already says so: `baseline_expression_stats` "comes from a
+normalisation scheme sceptre does not use, and on day0 it sits about 16 % below the mean sceptre's
+own model implies", with `baseline_expression_stats_from_fits` recommended instead.
+
+**PerturbPlan is not doing anything wrong.** It takes `expression_mean` as an input. What is wrong
+is feeding it the poscounts normalised mean, and the two tools differ only in how far that input
+travels:
+
+| | vs the mean sceptre's model implies |
+|---|---|
+| analytical formula — uses `expression_mean` **as-is**, no per-cell factor | **0.84, 16 % low** |
+| WattEG's simulation — `mean_i x sf_j`, the factor multiplied back | **0.959, 4.1 % low** |
+
+"The mean sceptre's model implies" is measurable and is exactly the observed raw mean:
+`mean(exp(X.beta))` reproduces it to 8e-9, because a Poisson GLM with an intercept satisfies
+`sum(fitted) == sum(observed)`. That identity is what makes this comparison sharp rather than a
+matter of taste.
+
+**The deeper point, which the level difference hides.** sceptre's model is
+`E[count_ij] = exp(X_j . beta_i)`, a full covariate-dependent mean. WattEG simulates
+`E[count_ij] = mean_i x sf_j`, one scalar per cell. Those differ in *shape across cells*, not only
+in scale, so the ratio-of-sums fix in §3.2b patches the average and leaves the structure wrong.
+
+**So the candidate fix is bigger than §3.2b and subsumes it: simulate from `exp(X_j . beta_i)`
+directly**, which is the same move the analytical side already made. It reproduces the observed
+mean exactly rather than approximately, reproduces the per-cell variation the test's own model
+assumes, and deletes the poscounts machinery entirely — with it go both §5.2's QC-cells question
+and §3.2b's estimator question, which exist only because size factors do. `fit_dispersions`
+already computes `fitted_coefs` and currently discards them.
+
+**The argument against, stated because it is real.** Simulating from the fitted model and then
+testing with that same model makes the test perfectly specified by construction, which may
+overstate power slightly; the present scheme is misspecified in the other direction. Neither is
+neutral. "Matches the model the real data was fit with" is the more defensible starting point, but
+this is a decision about what the power analysis *means*, not a bug fix, and it is the user's.
+
+**Nothing is changed pending that decision**, and the phase-2 gate is unaffected either way: it
+asks whether the port reproduces R, and it does.
+
 ### 3.3 Seeding contract is preserved
 
 Today: `set.seed(derive_seed(seed, target, rep, effect_size))` before each replicate, and a separate
