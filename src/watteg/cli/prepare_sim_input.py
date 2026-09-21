@@ -152,13 +152,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  genes kept: {len(genes)} of {len(in_use.gene_ids)} (those in QC-passing pairs)")
 
     print(f"fitting dispersions for {len(genes)} genes over {n_in_use:,} cells ...")
-    dispersion = fit_dispersions(
+    dispersion, fit_diagnostics = fit_dispersions(
         in_use.response_matrix,
         in_use.gene_ids,
         in_use.covariate_matrix,
         genes,
         n_jobs=args.n_jobs,
     )
+    # Named, not counted. A gene whose theta came from method of moments rather
+    # than the MLE is the first place to look when its power is surprising, and
+    # a count alone does not say which gene to look at.
+    for kind, affected in fit_diagnostics.items():
+        if affected:
+            shown = ", ".join(affected[:5])
+            more = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
+            print(f"  {kind}: {len(affected)} gene(s) -- {shown}{more}")
 
     gene_rows = np.array([in_use.gene_ids.index(g) for g in genes])
     row_data = pd.DataFrame(

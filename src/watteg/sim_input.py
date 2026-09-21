@@ -25,6 +25,18 @@ the only ones any test sees. So `col_data` and the perturbation matrices are
 over `cells_in_use`, while the per-gene values in `row_data` were derived from
 all of them.
 
+That narrowing is what the R path never did -- R simulated counts for all
+586,309 columns and handed sceptre a matrix it then subset -- and it leaves one
+thing for phase 4 to decide. The Stage A validation tests *Python-simulated*
+counts through *R's* engine, and R's harness indexes the matrix it is given by
+`template@cells_in_use`. So a matrix simulated here has to be re-expanded to the
+object's full cell count first, which `cells_in_use` makes mechanical, and the
+QC-failed columns have to be filled with something. Zeros are the obvious
+filler and are probably harmless -- sceptre reads `n_nonzero_trt`/`_cntrl` from
+the template's `discovery_pairs_with_info` rather than from the matrix -- but
+"probably" is not good enough to bake in here, so the filler is Stage A's
+decision and is recorded in `docs/pysceptre-backend.md`.
+
 Stored as one HDF5 file. Two sparse matrices, two small tables and a covariate
 matrix do not need a format with opinions, and one file is what a workflow
 engine stages most easily.

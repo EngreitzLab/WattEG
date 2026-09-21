@@ -3,12 +3,14 @@
 
     workflow/compare_dispersion.py <export> <r_reference_dir>
 
-This is **not** a pass/fail comparison and deliberately has no tolerance. The
-other quantities in `prepare_sim_input` are arithmetic over the same numbers, so
-they can be required to agree to floating point. A dispersion is the output of
-an iterative maximum-likelihood fit: sceptre's cache came from its own Poisson
-IRLS and theta estimator, this comes from pysceptre's, and the two agreeing to
-three or four digits is the expected result rather than a disappointing one.
+**This was written expecting a distribution to judge by eye, and the
+measurement made it a gate.** A dispersion is the output of an iterative
+maximum-likelihood fit -- sceptre's cache came from its own Poisson IRLS and
+theta estimator, this from pysceptre's -- so agreeing to three or four digits
+would have been the expected result. Measured on day0 they agree to about ten:
+2.8e-12 at the median and 1.2e-9 at worst over 237 genes. So the tolerance is
+1e-6, which is generous against what the port actually achieves and still tight
+enough to catch a wrong model rather than a differently-rounded one.
 
 What the output is for is judging whether the difference could move power.
 The simulation draws from `NB(mu, size = 1/dispersion)`, so a relative shift in
@@ -40,6 +42,7 @@ def main() -> int:
     parser.add_argument("export", type=Path, help="a pysceptre export")
     parser.add_argument("reference", type=Path, help="output of workflow/dump_r_sim_input.R")
     parser.add_argument("--n-jobs", type=int, default=1)
+    parser.add_argument("--rtol", type=float, default=1e-6)
     args = parser.parse_args()
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "pysceptre" / "scripts"))
@@ -54,7 +57,7 @@ def main() -> int:
         f"{export.covariate_matrix.shape[1]} covariates ..."
     )
 
-    ours = fit_dispersions(
+    ours, diagnostics = fit_dispersions(
         export.response_matrix,
         export.gene_ids,
         export.covariate_matrix,
@@ -65,7 +68,11 @@ def main() -> int:
     theirs = read_floats(args.reference / "row_dispersion.txt")
 
     rel = np.abs(mine - theirs) / theirs
-    print(f"\ndispersion, {len(genes)} genes (R's cache vs pysceptre's fit)")
+    ok = bool(np.all(rel < args.rtol))
+    print(
+        f"\n{'PASS' if ok else 'FAIL'}  dispersion, {len(genes)} genes "
+        f"(R's cache vs pysceptre's fit)"
+    )
     for q in (50, 90, 99, 100):
         print(f"  {q:>3}th percentile of |relative difference|: {np.percentile(rel, q):.3e}")
     for tol in (1e-12, 1e-9, 1e-6, 1e-3):
@@ -86,7 +93,10 @@ def main() -> int:
         f"\n  A gene at the median difference simulates with {np.median(rel):.2e} relative "
         "difference in negative-binomial variance against R's."
     )
-    return 0
+    for kind, affected in diagnostics.items():
+        if affected:
+            print(f"  {kind}: {len(affected)} gene(s) -- {', '.join(affected[:5])}")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from pysceptre.pipeline.discovery import (
     _GENE_BATCH_WIDTH,
     _GENE_CHUNK_MEMORY_GB,
     fit_all_genes,
+    summarize_gene_fits,
 )
 
 
@@ -35,8 +36,13 @@ def fit_dispersions(
     genes: list[str],
     *,
     n_jobs: int = 1,
-) -> dict[str, float]:
-    """Dispersion (`1/theta`) per gene, in the order `genes` gives.
+) -> tuple[dict[str, float], dict[str, list[str]]]:
+    """Dispersion (`1/theta`) per gene, and which fits were degenerate.
+
+    The second return value names the genes whose GLM did not converge, whose
+    theta MLE fell back to method of moments, and so on. pysceptre warns about
+    the counts; the ids are what someone needs when one gene's power looks
+    wrong, so they are handed back rather than left in a warning string.
 
     `counts` is (n_genes, n_cells) over `cells_in_use`, `gene_ids` labels its
     rows, and `covariate_matrix` is (n_cells, p) over the same cells.
@@ -81,4 +87,4 @@ def fit_dispersions(
             f"{nonfinite[:5]}."
         )
 
-    return {g: 1.0 / fits[g].theta for g in genes}
+    return {g: 1.0 / fits[g].theta for g in genes}, summarize_gene_fits(fits)
