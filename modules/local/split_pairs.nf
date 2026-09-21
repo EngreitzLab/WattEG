@@ -29,7 +29,7 @@ process SPLIT_PAIRS {
     script:
     """
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
-        Rscript ${projectDir}/src/split_pairs.R \\
+        watteg-split-pairs \\
             --pairs ${pairs} \\
             --n-splits ${params.n_splits} \\
             --outdir .

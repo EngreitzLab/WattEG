@@ -32,8 +32,3 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/watteg"]
 
-# pysceptre is not on PyPI. Pinned by path while the port is in development; this becomes a
-# git dependency pinned by commit when the pixi environment is rebuilt (see
-# docs/pysceptre-backend.md section 10).
-[tool.uv.sources]
-pysceptre = { path = "../pysceptre", editable = true }

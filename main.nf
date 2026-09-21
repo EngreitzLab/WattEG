@@ -6,31 +6,43 @@
 //
 // The DAG, and why it has the shape it has:
 //
-//   samplesheet -> PREPARE_SIM_INPUT ---+-> SPLIT_PAIRS -----------------+
-//                                       |                               |
-//                                       +-> FIT_NULL_MODELS (x reps)    |
-//                                           -> MERGE_NULL_MODELS -------+
-//                                                                       v
-//                                       POWER_SIMULATION (split x effect size)
-//                                            -> collectFile by (sample, effect size)
-//                                            -> COMPUTE_POWER -> SUMMARIZE_POWER
+//   samplesheet -> PREPARE_SIM_INPUT -> SPLIT_PAIRS
+//                                            -> POWER_SIMULATION (split x effect size x rep chunk)
+//                                                 -> CONSOLIDATE_REPLICATES
+//                                                 -> COMPUTE_POWER -> SUMMARIZE_POWER
 //
-// FIT_NULL_MODELS hangs off PREPARE_SIM_INPUT rather than off SPLIT_PAIRS because a gene's null
-// model is independent of both the target and the effect size: it is fitted on a null simulation
-// with no knockdown. One set of fits therefore serves every split and every effect size in a sweep
-// -- 100 replicates, not 100 x however many effect sizes. Making it a sibling of SPLIT_PAIRS rather
-// than a descendant is what expresses that.
+// FIT_NULL_MODELS and MERGE_NULL_MODELS used to hang off PREPARE_SIM_INPUT here. They existed
+// because R refitting a gene's null model inside every call cost 4.3x, so the fits were hoisted
+// into their own processes and injected. The Python path fits each gene's null on that replicate's
+// own simulated counts as a matter of course -- which is the faithful configuration that hoist was
+// built to approximate -- so both processes are gone, and with them reps_per_null_chunk,
+// test_max_null_reps and the divisibility check on them.
 
 nextflow.enable.dsl = 2
 
 include { PREPARE_SIM_INPUT } from './modules/local/prepare_sim_input'
 include { SPLIT_PAIRS       } from './modules/local/split_pairs'
-include { FIT_NULL_MODELS   } from './modules/local/fit_null_models'
-include { MERGE_NULL_MODELS } from './modules/local/merge_null_models'
 include { POWER_SIMULATION  } from './modules/local/power_simulation'
 include { CONSOLIDATE_REPLICATES } from './modules/local/consolidate_replicates'
 include { COMPUTE_POWER     } from './modules/local/compute_power'
 include { SUMMARIZE_POWER   } from './modules/local/summarize_power'
+
+// Resolve a samplesheet path against the repository root rather than the launch directory, so a
+// run's validity does not depend on where it was started from. A scheme-prefixed URI (gs://, s3://,
+// az://) is absolute in the same sense a leading '/' is, and must not be prefixed either.
+//
+// Test the STRING, not file(p).isAbsolute(): Nextflow's file() resolves a relative path against
+// launchDir and hands back an absolute path, so isAbsolute() is always true and the projectDir
+// fallback would never fire -- silently making resolution depend on the launch directory, which is
+// the thing this is here to prevent.
+//
+// A function, not a closure assigned with `def`: Nextflow 26.04's strict syntax does not see the
+// latter from inside a workflow body.
+def resolve(p) {
+    p.toString().startsWith('/') || p.toString().matches('(?i)^[a-z][a-z0-9+.-]*://.*')
+        ? file(p)
+        : file("${projectDir}/${p}")
+}
 
 workflow {
     main:
@@ -45,11 +57,6 @@ workflow {
         error "num_replicates (${params.num_replicates}) must be a multiple of reps_per_chunk " +
               "(${params.reps_per_chunk}); otherwise the last chunk is short and the power " +
               "denominators differ between pairs."
-    }
-    if (params.num_replicates % params.reps_per_null_chunk != 0) {
-        error "num_replicates (${params.num_replicates}) must be a multiple of " +
-              "reps_per_null_chunk (${params.reps_per_null_chunk}), or some replicate will have " +
-              "no null model fitted for it."
     }
     // The gcb profile has no default container_image -- see conf/gcb.config for why -- so a run
     // that forgets --container_image would otherwise fail 5-30 minutes in, on the first task,
@@ -72,9 +79,6 @@ workflow {
     // A scheme-prefixed URI (gs://, s3://, az://) is absolute in the same sense a leading '/' is --
     // it already names a full location, not one relative to the repo. Without this check,
     // '${projectDir}/gs://bucket/obj' is nonsense and never exists.
-    def resolve = { p ->
-        p.toString().startsWith('/') || p.toString().matches('(?i)^[a-z][a-z0-9+.-]*://.*') ? file(p) : file("${projectDir}/${p}")
-    }
 
     // Emptiness is checked on the file, eagerly, rather than with .ifEmpty on the channel.
     // ifEmpty's closure is invoked while the DAG is being built, not when the channel turns out to
@@ -93,21 +97,18 @@ workflow {
         .fromPath(sheet, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
-            if (!row.sample?.trim() || !row.sceptre_object?.trim()) {
+            if (!row.sample?.trim() || !row.dataset?.trim()) {
                 error "samplesheet ${params.samplesheet} needs non-empty 'sample' and " +
-                      "'sceptre_object' columns; got: ${row}"
+                      "'dataset' columns; got: ${row}"
             }
-            def obj = resolve(row.sceptre_object.trim())
-            if (!obj.exists()) {
-                error "sample '${row.sample}': sceptre object not found at ${obj}"
+            // A .h5mu from pysceptre's export, written with --all-genes --all-cells. The sceptre
+            // object is no longer an input to this pipeline at all: converting it is a one-off
+            // step that happens outside, which is what lets the environment hold no R.
+            def dataset = resolve(row.dataset.trim())
+            if (!dataset.exists()) {
+                error "sample '${row.sample}': dataset not found at ${dataset}"
             }
-            // Optional: only set when the sceptre object's response matrix is odm-backed. Absent
-            // for every existing samplesheet, which is why the column and the check are optional.
-            def odm = row.response_odm?.trim() ? resolve(row.response_odm.trim()) : []
-            if (odm && !odm.exists()) {
-                error "sample '${row.sample}': --response-odm file not found at ${odm}"
-            }
-            [ [id: row.sample.trim()], obj, odm ]
+            [ [id: row.sample.trim()], dataset ]
         }
 
     // ---- step 1: reduce the sceptre object -------------------------------------------------
@@ -134,41 +135,18 @@ workflow {
                  "${params.test_max_splits} of ${params.n_splits} splits. NOT a complete run."
     }
 
-    // ---- step 2b: null models, one task per replicate chunk --------------------------------
-    //
-    // Fanned out over replicate offsets and joined back to the sample's prepared inputs. Divisibility
-    // of num_replicates by reps_per_null_chunk is checked above, so every chunk is full width.
-    // The chunk count is bounded when the range is built rather than with `take` afterwards, both
-    // because it avoids the operator-argument problem above and because it is what it means: there
-    // are only this many chunks, not "there are 100 and we ignore most of them".
-    def reps_to_fit    = params.test_max_null_reps ?: params.num_replicates
-    def n_null_chunks  = reps_to_fit.intdiv(params.reps_per_null_chunk)
-
-    ch_null_offsets = Channel
-        .of(0..<n_null_chunks)
-        .map { i -> [ i * params.reps_per_null_chunk, params.reps_per_null_chunk ] }
-
-    ch_prepared = PREPARE_SIM_INPUT.out.sim_input
-        .join(PREPARE_SIM_INPUT.out.template)
-        .join(PREPARE_SIM_INPUT.out.grna_targets)
-
-    FIT_NULL_MODELS(ch_prepared.combine(ch_null_offsets))
-
-    // ---- step 2c: merge the chunks ---------------------------------------------------------
-    //
-    // groupTuple with an explicit size would deadlock if a chunk failed; the default waits for the
-    // channel to close instead, and merge_null_models.R independently checks the replicate count.
-    ch_chunks = FIT_NULL_MODELS.out.chunk.groupTuple()
-
-    def merged_reps = params.test_max_null_reps ?: params.num_replicates
-    MERGE_NULL_MODELS(ch_chunks, merged_reps)
-
-    // ---- step 4: the simulation ------------------------------------------------------------
+    // ---- step 3: the simulation ------------------------------------------------------------
     //
     // The per-sample inputs are one item; the fan-out is the cross product of splits, effect sizes
-    // and replicate chunks. Joining the null models in first keeps the sample's five inputs
-    // together, so `combine` only ever multiplies out the things that genuinely vary.
-    ch_sim_inputs = ch_prepared.join(MERGE_NULL_MODELS.out.null_models)
+    // and replicate chunks. Joining the sample's inputs first keeps them together, so `combine`
+    // only ever multiplies out the things that genuinely vary.
+    //
+    // pairs_with_info is optional -- an export with no discovery_pairs_with_info produces none --
+    // so it is mixed in with a default rather than joined, which would drop the sample entirely.
+    ch_sim_inputs = PREPARE_SIM_INPUT.out.sim_input
+        .join(PREPARE_SIM_INPUT.out.grna_targets)
+        .join(PREPARE_SIM_INPUT.out.pairs_with_info, remainder: true)
+        .map { meta, sim_input, grna_targets, info -> [meta, sim_input, grna_targets, info ?: []] }
 
     ch_rep_chunks = Channel
         .of(0..<(params.num_replicates.intdiv(params.reps_per_chunk)))
@@ -178,7 +156,7 @@ workflow {
     // than with every sample's.
     // No trailing map: `combine` flattens the [offset, reps] pair into two elements rather than
     // keeping it as one, so this already emits the nine fields POWER_SIMULATION declares --
-    // meta, sim_input, template, grna_targets, null_models, split, effect_size, rep_offset, reps.
+    // meta, sim_input, grna_targets, pairs_with_info, split, effect_size, rep_offset, reps.
     ch_sim_tasks = ch_sim_inputs
         .combine(ch_splits, by: 0)
         .combine(Channel.fromList(params.effect_sizes))
@@ -223,13 +201,6 @@ workflow {
     SUMMARIZE_POWER(ch_summary_in)
 }
 
-workflow.onComplete {
-    log.info(
-        """
-        ${workflow.success ? 'Completed' : 'FAILED'}: ${workflow.runName}
-          duration : ${workflow.duration}
-          outdir   : ${params.outdir}
-          command  : ${workflow.commandLine}
-        """.stripIndent()
-    )
-}
+// The `workflow.onComplete { ... }` summary that used to sit here is gone: Nextflow 26.04's strict
+// syntax rejects top-level statements, and everything it printed -- success, duration, outdir and
+// the command line -- Nextflow's own completion summary and `-with-report` already carry.

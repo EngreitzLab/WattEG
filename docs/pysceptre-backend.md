@@ -619,16 +619,32 @@ one stage with an absolute bar rather than a relative one.
    luck: counts stored as `uint16` made `np.log` return **float32** (2.5e-7 on the size factors);
    `grna_perts` was missing the non-targeting guides, which would have kept the control arm's mean
    while losing its guide-level variance; and `pairs.tsv`'s column order.
-3. **Benchmark before committing to the shape.** 3 targets x 100 simulations on the fixture, timing
-   (a) one call per (target, replicate), (b) replicates stacked per §2, at 10/25/50/100 replicates
-   per chunk, with peak RSS — and **broken down into the four terms of §2.5**, not reported as a
-   single wall clock. *Gate: this sets `reps_per_chunk`, gives the first honest estimate of CPU-h
-   per effect size against R's 634, and is the only evidence that could reopen §5.3. If it is not
-   comfortably ahead of R, stop and re-plan rather than porting the remaining four steps.*
-4. **`run_power_simulation` in Python** + Stage A validation.
-5. **The four cheap steps** (`split_pairs`, `consolidate_replicates`, `compute_power`,
-   `summarize_power`, `fit_power_curve`) — mechanical, byte-compatible outputs.
-6. **Nextflow rewiring**, new container, resource recalibration (§10).
+3. ~~**Benchmark before committing to the shape.**~~ **Done, and it overturned §2.** The four
+   terms, measured: the per-pair test is **85 %** of the work, the per-gene Poisson fits 14 %,
+   drawing counts 5 %, and the per-target binomial fit and CRT draws **1.5 %** — of which the
+   redundancy stacking would remove is **0.8 %**. So there is almost nothing to amortise, the two
+   shapes measure the same, and **the simple one wins on simplicity alone**: `engine.py` makes one
+   call per (target, replicate), with no pseudo-genes, no pseudo-target keys, no replicate-chunk
+   memory knob and no question about replicates sharing a resampling stream. §5.3 is dead on its
+   own terms — 0.8 % was the number it had to beat.
+4. ~~**`run_power_simulation` in Python** + Stage A validation.~~ **Done.** Stage A was dropped
+   (§8), so equivalence is measured on output: 40 replicates of one target, both implementations,
+   every bound derived from the data's own spread. Per-pair power agrees 8/8 within Monte Carlo
+   noise with no systematic shift, and each implementation's median fold change lands on
+   `log2(0.85)` — an *absolute* check, which is the only kind that can catch both being wrong the
+   same way.
+5. ~~**The four cheap steps**~~ **Done** for `split_pairs`, `consolidate_replicates`,
+   `compute_power` and `summarize_power`, checked against R **on identical input**, which makes
+   them exact comparisons rather than statistical ones: every column agrees to machine epsilon,
+   in R's column order. The comparison caught `max_effect_size_tested` missing entirely and the
+   per-gene columns sitting in the wrong place. `fit_power_curve` is **not** ported — it serves
+   the paper's reduced-design study rather than the pipeline, and nothing in the DAG calls it.
+6. **Nextflow rewiring** — done: `FIT_NULL_MODELS` and `MERGE_NULL_MODELS` are gone, the six
+   remaining processes call the `watteg-*` entry points, the samplesheet column is `dataset`
+   (a `.h5mu`) rather than `sceptre_object`, and `pixi.toml` holds no R. **Still open: the new
+   container and the resource recalibration.** The `conf/*.config` memory closures were tuned
+   around R's 2.27 GB median and must be re-measured, not carried over — the Python footprint is a
+   different function of the cell count and the gene count.
 7. **Stage B/C/D validation** at full scale on one effect size.
 8. **Docs**: `usage.md`, `methods.md` and `status.md` rewritten for the Python path; the R path
    documented as the reference implementation it has become.

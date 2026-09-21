@@ -1,72 +1,61 @@
-// Step 4 -- the simulation. One task per (split, effect size, simulation chunk).
+// Step 3 -- the simulation. One task per (split, effect size, replicate chunk).
 //
-// This is where essentially all of the compute goes: 635 CPU-hours per effect size on
-// day0_grna20_no_shuffle at 100 simulations, against a few CPU-hours for everything else combined.
+// This is where essentially all of the compute goes.
 //
 // WHY THE FAN-OUT IS OVER (split x effect size) AND NOT A LOOP OVER EFFECT SIZES
 //
-// Looping inside the task would share the per-task setup -- the 16 MB sim_input.rds and 47 MB
-// sceptre_template.rds reads, plus container and R startup -- across effect sizes. That setup is
-// ~1 second against a task measured in tens of minutes, while the loop would multiply each task's
-// duration by the number of effect sizes and divide the parallelism by the same factor. With
-// thousands of cores available on `owners`, repeating a little I/O is much the better trade.
+// Looping inside the task would share the per-task setup across effect sizes. That setup is a
+// second or so against a task measured in minutes, while the loop would multiply each task's
+// duration by the number of effect sizes and divide the parallelism by the same factor.
 //
-// --null-precomputations is NOT optional here. Without it run_power_simulation.R either refits the
-// null model inside every call (4.3x the cost) or -- if the template still carried the inherited
-// real-data cache -- would silently test simulated counts against real-data coefficients and
-// understate power. The template has that slot cleared by slim_sceptre_object(), and the script
-// errors rather than falling back, so the failure mode that went unnoticed through the whole
-// refactor cannot recur here.
+// THERE IS NO --null-precomputations, AND THAT IS THE POINT. R hoisted the per-gene null model out
+// of the simulation because refitting it inside every call cost 4.3x. The Python path fits each
+// gene's null on that replicate's own simulated counts as a matter of course, which is the faithful
+// configuration R's hoist was built to approximate -- so FIT_NULL_MODELS and MERGE_NULL_MODELS are
+// gone, along with the seed-matching guard between a bundle and the run that consumes it.
 
 process POWER_SIMULATION {
     tag "${meta.id} ${split.baseName} es${effect_size} reps ${rep_offset + 1}-${rep_offset + reps}"
 
-    // Published for the same reason the sbatch runner keeps them: they are the only record of the
-    // per-simulation p-values, they let a run be compared split by split against the other runner,
-    // and re-deriving one costs a full task. This is the bulky output -- ~1,000 files per effect
-    // size, a few hundred MB in total.
-    // NOT published. These per-split files are what makes the run resumable and preemption-tolerant --
-// 1,000 tasks write concurrently and no single-file format supports that -- but as a published
-// artefact they were 6,000 files costing 30-90 s of parsing per read. CONSOLIDATE_REPLICATES turns
-// each effect size into one Parquet file and publishes that instead.
-//
-// They survive in the work directory until Nextflow cleans it, so a failed consolidation cannot
-// lose data.
+    // NOT published. These per-split files are what makes the run resumable and
+    // preemption-tolerant -- many tasks write concurrently and no single-file format supports that
+    // -- but as a published artefact they cost 30-90 s of parsing per read. CONSOLIDATE_REPLICATES
+    // turns each effect size into one Parquet file and publishes that instead. They survive in the
+    // work directory until Nextflow cleans it, so a failed consolidation cannot lose data.
 
     input:
-    tuple val(meta), path(sim_input), path(sceptre_template), path(grna_targets),
-          path(null_models), path(split), val(effect_size), val(rep_offset), val(reps)
+    tuple val(meta), path(sim_input), path(grna_targets), path(pairs_with_info),
+          path(split), val(effect_size), val(rep_offset), val(reps)
 
     output:
     tuple val(meta), val(effect_size), path(out_name), emit: sim
 
     script:
-    // The simulation range is part of the filename so chunks of one split cannot collide, and so a
-    // stray file is attributable. With no chunking (reps_per_chunk == num_replicates) there is
-    // exactly one per split, which is what every measured run has done.
+    // The replicate range is in the filename so chunks of one split cannot collide and a stray file
+    // is attributable.
     out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv.gz"
     """
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
-        Rscript ${projectDir}/src/run_power_simulation.R \\
-            --sim-input ${sim_input} \\
-            --sceptre-template ${sceptre_template} \\
+        watteg-run-power-simulation \\
+            --prepared . \\
             --pairs ${split} \\
-            --grna-targets ${grna_targets} \\
-            --null-precomputations ${null_models} \\
             --effect-size ${effect_size} \\
             --reps ${reps} \\
             --rep-offset ${rep_offset} \\
             --guide-sd ${params.guide_sd} \\
             --seed ${params.seed} \\
-            --out ${out_name}
+            --n-jobs ${task.cpus} \\
+            --expression-model ${params.expression_model} \\
+            --out ${out_name.replace('.gz', '')}
+    gzip -f ${out_name.replace('.gz', '')}
 
-    # A short file means simulation rows were lost, which compute_power.R would otherwise absorb as
-    # a smaller denominator for the affected pairs.
+    # A short file means replicate rows were lost, which compute_power would otherwise absorb as a
+    # smaller denominator for the affected pairs.
     n_pairs=\$(( \$(wc -l < ${split}) - 1 ))
     expected=\$(( n_pairs * ${reps} + 1 ))
     actual=\$(gzip -cd ${out_name} | wc -l)
     if [ "\${actual}" -ne "\${expected}" ]; then
-        echo "ERROR: wrote \${actual} lines, expected \${expected} (\${n_pairs} pairs x ${reps} reps + header)." >&2
+        echo "ERROR: wrote \${actual} lines, expected \${expected} (\${n_pairs} pairs x ${reps} replicates + header)." >&2
         exit 1
     fi
     """

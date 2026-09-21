@@ -46,7 +46,6 @@ n_splits: 1000
 
 # Simulations per null-model task (step 02b). One fit covers every gene on one simulation in ~20
 # minutes, so 1 per task keeps the whole set at ~20 minutes rather than ~33 hours serial.
-reps_per_null_chunk: 1
 
 # Simulations per simulation task. Set equal to num_replicates for no chunking, which is what every
 # run so far has done and what the measured cost model assumes.
@@ -67,5 +66,3 @@ conf_level: 0.95
 
 # Optional, unset by default.
 # alpha: 0.05                 # p-value threshold; otherwise derived from the sceptre object
-# n_control_cells: 5000       # sample controls rather than using all; costs 21-60% of power
-# cell_batches: batch_factor  # covariate to stratify control sampling by

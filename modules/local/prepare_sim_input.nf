@@ -1,53 +1,51 @@
-// Step 1 -- reduce the sceptre object to what the simulation actually needs.
+// Step 1 -- reduce the dataset to what the simulation actually needs.
 //
-// One input file, not four: the other three the old pipeline demanded duplicate data already inside
-// the object (@discovery_pairs_with_info, @grna_target_data_frame, @discovery_result). See
-// docs/status.md, "Measured improvements".
+// The input is a .h5mu written by pysceptre's export, NOT a sceptre object: nothing in the Python
+// path reads R, which is what lets the environment be one Python package. The export must have been
+// written with --all-cells, because the poscounts size factors are a per-cell reduction over every
+// cell in the object and reproducing R's needs every cell. See src/watteg/expression.py.
 //
-// The emitted sceptre_template.rds has its @response_matrix emptied and, importantly, its inherited
-// @response_precomputations cleared by slim_sceptre_object() -- that clearing is what makes an
-// accidental as_is run impossible to reintroduce downstream.
+// There is no sceptre_template.rds any more. That was an R object carrying the covariate matrix and
+// the analysis parameters; those now live in sim_input.h5 and analysis_mode.tsv.
 
 process PREPARE_SIM_INPUT {
     tag "${meta.id}"
 
-    publishDir "${params.outdir}/${meta.id}/prepared", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}/prepared" }, mode: params.publish_mode
 
     input:
-    tuple val(meta), path(sceptre_object), path(response_odm)
+    tuple val(meta), path(dataset)
 
     output:
-    tuple val(meta), path('sim_input.rds'),         emit: sim_input
-    tuple val(meta), path('sceptre_template.rds'),  emit: template
-    tuple val(meta), path('pairs.tsv'),             emit: pairs
-    tuple val(meta), path('grna_targets.tsv'),      emit: grna_targets
+    tuple val(meta), path('sim_input.h5'),            emit: sim_input
+    tuple val(meta), path('pairs.tsv'),               emit: pairs
+    tuple val(meta), path('pairs_with_info.tsv'),     emit: pairs_with_info, optional: true
+    tuple val(meta), path('grna_targets.tsv'),        emit: grna_targets
     tuple val(meta), path('discovery_threshold.txt'), emit: threshold
-    tuple val(meta), path('analysis_mode.tsv'),     emit: analysis_mode
-    path 'versions.yml',                            emit: versions
+    tuple val(meta), path('analysis_mode.tsv'),       emit: analysis_mode
+    path 'versions.yml',                              emit: versions
 
     script:
-    // response_odm is [] (no files staged) for every sample whose response matrix isn't odm-backed.
-    def response_odm_flag = response_odm ? "--response-odm ${response_odm}" : ''
-    def control_cells = params.n_control_cells ? "--n-control-cells ${params.n_control_cells}" : ''
-    def batches       = params.cell_batches    ? "--cell-batches ${params.cell_batches}"       : ''
-    def alpha         = params.alpha           ? "--alpha ${params.alpha}"                     : ''
+    def alpha = params.alpha ? "--threshold ${params.alpha}" : ''
     """
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
-        Rscript ${projectDir}/src/prepare_sim_input.R \\
-            --sceptre-object ${sceptre_object} \\
+        watteg-prepare-sim-input \\
+            --dataset ${dataset} \\
             --outdir . \\
-            ${response_odm_flag} ${control_cells} ${batches} ${alpha}
+            --n-jobs ${task.cpus} \\
+            ${alpha}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        r-base: \$(pixi run --frozen --manifest-path ${projectDir}/pixi.toml Rscript -e 'cat(strsplit(R.version.string, " ")[[1]][3])')
-        sceptre: \$(pixi run --frozen --manifest-path ${projectDir}/pixi.toml Rscript -e 'cat(as.character(utils::packageVersion("sceptre")))')
+        python: \$(pixi run --frozen --manifest-path ${projectDir}/pixi.toml python -c 'import platform; print(platform.python_version())')
+        watteg: \$(pixi run --frozen --manifest-path ${projectDir}/pixi.toml python -c 'import watteg; print(watteg.__version__)')
+        pysceptre: \$(pixi run --frozen --manifest-path ${projectDir}/pixi.toml python -c 'import pysceptre; print(getattr(pysceptre, "__version__", "unknown"))')
     END_VERSIONS
     """
 
     stub:
     """
-    touch sim_input.rds sceptre_template.rds pairs.tsv grna_targets.tsv discovery_threshold.txt analysis_mode.tsv
+    touch sim_input.h5 pairs.tsv pairs_with_info.tsv grna_targets.tsv discovery_threshold.txt analysis_mode.tsv
     echo '"${task.process}": {}' > versions.yml
     """
 }

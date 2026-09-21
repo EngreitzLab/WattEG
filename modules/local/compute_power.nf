@@ -12,7 +12,7 @@
 process COMPUTE_POWER {
     tag "${meta.id} es${effect_size}"
 
-    publishDir "${params.outdir}/${meta.id}/power", mode: params.publish_mode
+    publishDir { "${params.outdir}/${meta.id}/power" }, mode: params.publish_mode
 
     input:
     // One consolidated Parquet per effect size, from CONSOLIDATE_REPLICATES. Was 1,000 staged
@@ -25,17 +25,16 @@ process COMPUTE_POWER {
 
     script:
     """
-    # A comma-separated list rather than a glob: compute_power.R accepts either, but an explicit
-    # list is a single token and its ordering is stable.
-    # Both forms matched: the per-simulation output is gzipped, but an older sweep being
-    # re-aggregated is plain .tsv. Missing the .gz here would have found no files and produced an
-    # empty power table rather than an error.
-    sim_list=\$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null | paste -sd, -)
-    echo "combining \$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null | wc -l) file(s)"
+    # An explicit list rather than a glob, so the ordering is stable and the count is checked.
+    # All three forms matched: the per-replicate output is gzipped, the consolidated one is
+    # Parquet, and an older sweep being re-aggregated is plain .tsv. Missing the .gz here would
+    # find no files and produce an empty power table rather than an error.
+    sim_list=\$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null)
+    echo "combining \$(echo "\${sim_list}" | wc -w) file(s)"
 
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
-        Rscript ${projectDir}/src/compute_power.R \\
-            --simulations "\${sim_list}" \\
+        watteg-compute-power \\
+            --simulations \${sim_list} \\
             --threshold-file ${threshold} \\
             --conf-level ${params.conf_level} \\
             --out power_es${effect_size}.tsv

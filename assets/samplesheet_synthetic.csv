@@ -1,2 +1,2 @@
-sample,sceptre_object
-synthetic,tests/data/sceptre_object_high_default.rds
+sample,dataset
+synthetic,tests/data/synthetic.h5mu

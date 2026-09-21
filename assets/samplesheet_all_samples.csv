@@ -1,5 +1,5 @@
-sample,sceptre_object
-day0_grna20,results/day0_grna20/sceptre_object.rds
-day0_grna20_no_shuffle,results/day0_grna20_no_shuffle/sceptre_object.rds
-day2_grna20,results/day2_grna20/sceptre_object.rds
-day4_grna20,results/day4_grna20/sceptre_object.rds
+sample,dataset
+day0_grna20,results/day0_grna20/dataset.h5mu
+day0_grna20_no_shuffle,results/day0_grna20_no_shuffle/dataset.h5mu
+day2_grna20,results/day2_grna20/dataset.h5mu
+day4_grna20,results/day4_grna20/dataset.h5mu
