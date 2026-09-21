@@ -30,7 +30,7 @@ from pathlib import Path
 
 import numpy as np
 
-from watteg.dispersion import fit_dispersions
+from watteg.gene_model import fit_gene_models
 
 
 def read_floats(path: Path) -> np.ndarray:
@@ -57,14 +57,15 @@ def main() -> int:
         f"{export.covariate_matrix.shape[1]} covariates ..."
     )
 
-    ours, diagnostics = fit_dispersions(
+    models = fit_gene_models(
         export.response_matrix,
         export.gene_ids,
         export.covariate_matrix,
         genes,
         n_jobs=args.n_jobs,
     )
-    mine = np.array([ours[g] for g in genes])
+    diagnostics = models.diagnostics
+    mine = models.dispersion
     theirs = read_floats(args.reference / "row_dispersion.txt")
 
     rel = np.abs(mine - theirs) / theirs

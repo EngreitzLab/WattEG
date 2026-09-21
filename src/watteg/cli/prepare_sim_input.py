@@ -37,8 +37,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-from watteg.dispersion import fit_dispersions
 from watteg.expression import compute_expression_stats
+from watteg.gene_model import fit_gene_models
 from watteg.sim_input import SimInput, write_sim_input
 
 
@@ -151,8 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {len(pairs):,} QC-passing pairs across {pairs['grna_target'].nunique():,} targets")
     print(f"  genes kept: {len(genes)} of {len(in_use.gene_ids)} (those in QC-passing pairs)")
 
-    print(f"fitting dispersions for {len(genes)} genes over {n_in_use:,} cells ...")
-    dispersion, fit_diagnostics = fit_dispersions(
+    print(f"fitting the per-gene model for {len(genes)} genes over {n_in_use:,} cells ...")
+    models = fit_gene_models(
         in_use.response_matrix,
         in_use.gene_ids,
         in_use.covariate_matrix,
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     # Named, not counted. A gene whose theta came from method of moments rather
     # than the MLE is the first place to look when its power is surprising, and
     # a count alone does not say which gene to look at.
-    for kind, affected in fit_diagnostics.items():
+    for kind, affected in models.diagnostics.items():
         if affected:
             shown = ", ".join(affected[:5])
             more = f" (+{len(affected) - 5} more)" if len(affected) > 5 else ""
@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     row_data = pd.DataFrame(
         {
             "mean": stats.normalized_mean[gene_rows],
-            "dispersion": [dispersion[g] for g in genes],
+            "dispersion": models.dispersion,
             "average_expression_all_cells": stats.average_expression_all_cells[gene_rows],
         },
         index=genes,
@@ -208,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         col_data=col_data,
         covariate_matrix=in_use.covariate_matrix,
         covariate_names=list(meta["covariate_names"]),
+        fitted_coefs=models.fitted_coefs,
         grna_ids=grna_ids,
         grna_perts=indicator_matrix(grna_ids, guide_cells, n_in_use),
         target_ids=target_ids,

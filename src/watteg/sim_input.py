@@ -6,10 +6,16 @@ two perturbation matrices, and nothing else earns its place. This carries the
 same five things plus the covariate matrix, which in R lived on the sceptre
 template that the Python path has no equivalent of.
 
-**The count matrix is deliberately absent.** The simulation draws counts from
-`row_data.mean` and `row_data.dispersion`, so carrying the real counts through
-every parallel task would cost memory and deserialisation time and be read by
-nothing.
+**The count matrix is deliberately absent.** The simulation draws counts from a
+per-gene baseline and dispersion, so carrying the real counts through every
+parallel task would cost memory and deserialisation time and be read by nothing.
+
+**The baseline is stored as coefficients, not as a matrix.** `fitted_coefs` plus
+`covariate_matrix` give `exp(X . beta)` for any gene in one matrix product --
+eleven numbers per gene against one per cell per gene, which is 567,690 times
+smaller. `row_data.mean` is kept beside it because the size-factor baseline the
+R implementation used needs it, and reproducing that is how the two are
+compared. See `baseline.py`.
 
 **Cells are positions, not barcodes.** R stored 586,309 cell barcodes; pysceptre's
 export does not carry them at all, and nothing in the Python pipeline needs them
@@ -49,7 +55,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 @dataclass
@@ -65,6 +71,7 @@ class SimInput:
     genes: list[str]
     cells_in_use: np.ndarray  # (n_cells,) positions in the original object
     row_data: pd.DataFrame  # index = genes; mean, dispersion, average_expression_all_cells
+    fitted_coefs: np.ndarray  # (n_genes, p), aligned to covariate_names
     col_data: pd.DataFrame  # one row per cell, positionally aligned; size_factors
     covariate_matrix: np.ndarray  # (n_cells, p)
     covariate_names: list[str]
@@ -88,6 +95,13 @@ class SimInput:
                 raise ValueError(f"row_data is missing the '{column}' column")
         if not np.isfinite(self.row_data["dispersion"]).all():
             raise ValueError("row_data.dispersion has non-finite entries")
+        if self.fitted_coefs.shape != (len(self.genes), len(self.covariate_names)):
+            raise ValueError(
+                f"fitted_coefs is {self.fitted_coefs.shape}, expected "
+                f"({len(self.genes)}, {len(self.covariate_names)})"
+            )
+        if not np.isfinite(self.fitted_coefs).all():
+            raise ValueError("fitted_coefs has non-finite entries")
         if len(self.col_data) != n_cells:
             raise ValueError(f"col_data has {len(self.col_data)} rows for {n_cells} cells")
         if "size_factors" not in self.col_data:
@@ -170,6 +184,7 @@ def write_sim_input(sim: SimInput, path: str | Path) -> Path:
 
         f.create_dataset("covariate_matrix", data=sim.covariate_matrix, compression="gzip")
         _write_strings(f, "covariate_names", sim.covariate_names)
+        f.create_dataset("fitted_coefs", data=sim.fitted_coefs)
 
         perts = f.create_group("perts")
         _write_strings(perts, "grna_ids", sim.grna_ids)
@@ -184,7 +199,9 @@ def read_sim_input(path: str | Path) -> SimInput:
         version = int(f.attrs.get("format_version", 0))
         if version != FORMAT_VERSION:
             raise ValueError(
-                f"{path} is sim_input format {version}, this build reads {FORMAT_VERSION}"
+                f"{path} is sim_input format {version}, this build reads {FORMAT_VERSION}. "
+                "Version 2 added fitted_coefs, which the default baseline needs; re-run "
+                "watteg-prepare-sim-input to produce one."
             )
         genes = _read_strings(f, "genes")
         row_data = pd.DataFrame(
@@ -205,6 +222,7 @@ def read_sim_input(path: str | Path) -> SimInput:
             col_data=pd.DataFrame(col_data),
             covariate_matrix=f["covariate_matrix"][:],
             covariate_names=_read_strings(f, "covariate_names"),
+            fitted_coefs=f["fitted_coefs"][:],
             grna_ids=_read_strings(f["perts"], "grna_ids"),
             grna_perts=_read_sparse(f["perts"], "grna_perts"),
             target_ids=_read_strings(f["perts"], "target_ids"),

@@ -24,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from watteg.dispersion import fit_dispersions
+from watteg.gene_model import fit_gene_models
 
 FAILURES: list[str] = []
 
@@ -106,10 +106,9 @@ def main() -> int:
         f"({rel.size:,} values)"
     )
 
-    _, diagnostics = fit_dispersions(
+    for kind, affected in fit_gene_models(
         export.response_matrix, export.gene_ids, X, genes, n_jobs=args.n_jobs
-    )
-    for kind, affected in diagnostics.items():
+    ).diagnostics.items():
         if affected:
             print(f"  {kind}: {len(affected)} gene(s) -- {', '.join(affected[:5])}")
 
