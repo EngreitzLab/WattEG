@@ -142,6 +142,17 @@ def measure_terms(sim, target, genes, counts, is_perturbed, params, seed, reps, 
 
 
 def call_engine(counts, gene_ids, covariates, target_cells_map, pairs, params, seed):
+    """Everything not named here is left at pysceptre's default.
+
+    `target_chunk_size` and `chunk_memory_gb` in particular: those are tuned,
+    and `chunk_memory_gb` is documented as the fastest and leanest setting
+    measured. B1/B2/B3 and the side are not defaults -- they are properties of
+    the screen, read off its own analysis parameters.
+
+    The inner entry point rather than `pipeline.api.run_discovery_analysis`,
+    which would size B2/B3 from `len(pairs)`; with replicates stacked the pair
+    count is inflated by the replicate count. See the plan, section 2.4.
+    """
     from pysceptre.pipeline.discovery import run_discovery_ntcells_complement
 
     return run_discovery_ntcells_complement(
@@ -155,6 +166,7 @@ def call_engine(counts, gene_ids, covariates, target_cells_map, pairs, params, s
         B3=params["B3"],
         side_code=params["side_code"],
         seed=seed,
+        n_jobs=params["n_jobs"],
     )
 
 
@@ -198,6 +210,15 @@ def main() -> int:
     parser.add_argument("--effect-size", type=float, default=0.15)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=8,
+        help="workers for the per-gene tests. 8 is the measured knee on a 10-performance-core "
+        "box: 2.5x wall clock for 1.5x CPU, with 14 slower than 8. It buys the thing you wait "
+        "on and costs the thing you are billed for, so CPU-hour comparisons against R -- whose "
+        "tasks were single-threaded -- should be read with that in mind.",
+    )
+    parser.add_argument(
         "--skip-per-rep", action="store_true", help="skip the per-rep shape, which is the slow one"
     )
     args = parser.parse_args()
@@ -215,10 +236,12 @@ def main() -> int:
         "B2": int(mode.get("B2", 4999)),
         "B3": int(mode.get("B3", 0)),
         "side_code": {"left": -1, "both": 0, "right": 1}[mode.get("side", "both")],
+        "n_jobs": args.n_jobs,
     }
     print(
         f"{sim.describe()}\n  B1/B2/B3 = {params['B1']}/{params['B2']}/{params['B3']}, "
-        f"side_code = {params['side_code']}"
+        f"side_code = {params['side_code']}, n_jobs = {params['n_jobs']} "
+        f"(everything else at pysceptre's default)"
     )
 
     # One small, one median, one large target, so the per-pair term is visible.
