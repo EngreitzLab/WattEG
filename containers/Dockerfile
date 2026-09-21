@@ -2,14 +2,14 @@
 #
 # WHY THE ENVIRONMENT IS BAKED IN RATHER THAN SOLVED AT RUN TIME
 #
-# Every task runs `pixi run --frozen --manifest-path ${projectDir}/pixi.toml Rscript ...`, so the
+# Every task runs `pixi run --frozen --manifest-path ${projectDir}/pixi.toml watteg-...`, so the
 # solved environment has to exist on disk before the first task starts. Solving it per task would
 # be minutes of work repeated thousands of times, and would need outbound network from every worker.
 #
-# It also CANNOT be reproduced from a conda specification alone, which rules out Wave's
-# conda-recipe mode: sceptre is installed from a pinned commit with a local patch applied, ondisc
-# from another pinned commit, and both compile C++. `pixi run setup` is what does that, so the image
-# has to run it at build time. See src/install_sceptre.R and src/install_ondisc.R.
+# It also cannot be reproduced from a conda specification alone, which rules out Wave's
+# conda-recipe mode: pysceptre is a git dependency pinned to a commit, and watteg itself is
+# installed from the tree. `pixi install --frozen` is what resolves both, so the image has to run
+# it at build time -- which is also why `git` is in the builder.
 #
 # WHY /opt/pipeline
 #
@@ -40,9 +40,12 @@
 # `--build-repo` that Seqera has push credentials for; conf/gcb.config has the longer note.
 #
 # THE IMAGE MUST BE REBUILT WHENEVER pixi.lock CHANGES. There is no check that enforces this: a
-# stale image simply fails at the first task that needs the new package, with an R error naming a
-# missing library rather than anything about the image. nanoparquet, added 2026-09-04, is the most
-# recent example -- CONSOLIDATE_REPLICATES fails without it.
+# stale image simply fails at the first task that needs the new package, with an ImportError naming
+# a missing module rather than anything about the image.
+#
+# That includes a change to the pysceptre pin. The engine is a git dependency pinned to a commit
+# precisely so a sweep can be re-run against the engine that produced it, and an image built before
+# the pin moved contains the older one.
 
 # ---- stage 1: build the environment --------------------------------------------------------
 #
@@ -60,11 +63,10 @@
 #   single stage, prune in RUN  9 layers   2.14 GiB   <- no effect whatsoever
 #   two stages                  6 layers   0.68 GiB   <- 3.1x smaller
 #
-# The remaining 0.68 GiB is 629 MiB of /opt/pipeline, 33 MiB of pixi binary, and the 28 MiB ubuntu
-# base. The base is NOT worth optimising: debian:bookworm-slim measures 26.9 MiB against ubuntu's
-# 28.4 MiB, 1.5 MiB of 700, and swapping a validated base for 0.2% is a bad trade. Nothing here
-# needs a heavy R base image either -- conda-forge's r-base carries R's shared libraries inside the
-# environment, which is why stage 2 can be a bare ubuntu with only ca-certificates added.
+# Those figures are the R image's and are kept because the STRUCTURAL point they establish still
+# holds; the Python environment is smaller, and the measurement has not been redone. The base is
+# not worth optimising either way: debian:bookworm-slim measures 26.9 MiB against ubuntu's 28.4
+# MiB, and swapping a validated base for 0.2% is a bad trade.
 
 FROM ubuntu:22.04 AS builder
 
@@ -98,19 +100,16 @@ WORKDIR /opt/pipeline
 #
 #   --frozen  use pixi.lock as committed, never re-solve. A worker silently re-solving would defeat
 #             the lockfile and would need network it may not have.
-#   build env carries the compilers, remotes, and the packages R CMD INSTALL demands from sceptre's
-#             DESCRIPTION even though the runtime path never calls them.
-#   setup     installs the patched sceptre and ondisc into .pixi/rlibs, compiling both.
-RUN pixi install --frozen \
-    && pixi install --frozen --environment build \
-    && pixi run --frozen setup \
-    && pixi run --frozen check-api
+#
+# There is no longer a build environment, a `setup` task or a `check-api` task. Those existed to
+# compile sceptre from a pinned commit with a local patch, and ondisc from another, and then to
+# verify the pin against the unexported S4 slots the pipeline read. The Python path compiles
+# nothing and reaches into nothing, so `pixi install --frozen` is the whole build.
+RUN pixi install --frozen
 
-# Dropped before the copy. .pixi/envs/build is 1.7 GB against 1.6 GB for the runtime environment
-# and 7.5 MB for the compiled sceptre and ondisc in .pixi/rlibs -- measured inside the image. No
-# task calls a compiler, and the compiled packages live in rlibs rather than inside the build
-# environment, so nothing the runtime needs goes with it.
-RUN rm -rf /opt/pipeline/.pixi/envs/build /root/.cache/rattler /root/.cache/pixi /root/.pixi/cache
+# The caches are dropped before the copy rather than after: see the multi-stage note above for why
+# a later `rm` would not actually make the image smaller.
+RUN rm -rf /root/.cache/rattler /root/.cache/pixi /root/.cache/uv /root/.pixi/cache
 
 # ---- stage 2: the runtime image ------------------------------------------------------------
 #
@@ -139,10 +138,12 @@ COPY --from=builder /opt/pipeline /opt/pipeline
 ENV PATH="/root/.pixi/bin:${PATH}"
 WORKDIR /opt/pipeline
 
-# Prove the runtime image works on its own terms: check-api runs in the default environment and
-# reaches sceptre's unexported slots, so a copy that missed something fails the BUILD rather than
-# the first task of a 6,000-task sweep.
-RUN pixi run --frozen check-api \
+# Prove the runtime image works on its own terms, so a copy that missed something fails the BUILD
+# rather than the first task of a several-thousand-task sweep. Importing watteg is not enough --
+# it would pass with pysceptre absent -- so this exercises the engine's entry point and the one
+# console script every run begins with.
+RUN pixi run --frozen python -c "import watteg, pysceptre; from pysceptre.pipeline.discovery import run_discovery_ntcells_complement; print('watteg', watteg.__version__)" \
+    && pixi run --frozen watteg-prepare-sim-input --help > /dev/null \
     && echo "built from $(cat /opt/pipeline/.image-built-from)"
 
 ENV WATTEG_ROOT=/opt/pipeline
