@@ -45,7 +45,10 @@ ruff = ">=0.5"
 dev = ["dev"]
 
 [tasks]
-pipeline-test = { cmd = "nextflow run . -profile stub -params-file config/test.yml -stub-run", description = "Check the Nextflow DAG wiring without running anything" }
+# The fixture is generated, not committed: it is ~1 MB of synthetic counts that any checkout can
+# rebuild in a second, and a binary blob in git is a blob in every clone forever.
+test-data = { cmd = "watteg-make-test-data --out tests/data/synthetic.h5mu", description = "Generate the synthetic dataset the stub run and smoke test use" }
+pipeline-test = { cmd = "nextflow run . -profile stub -params-file config/test.yml -stub-run", depends-on = ["test-data"], description = "Check the Nextflow DAG wiring without running anything" }
 install-hooks = { cmd = "./.githooks/install.sh", description = "Enable the repository pre-commit hook" }
 lint = { cmd = "./.githooks/pre-commit --all", description = "Run the pre-commit checks across every tracked file" }
 

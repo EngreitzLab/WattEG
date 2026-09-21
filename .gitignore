@@ -91,3 +91,4 @@ tests/config/inputs/
 .venv/
 __pycache__/
 *.egg-info/
+tests/data/*.h5mu
