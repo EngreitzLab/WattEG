@@ -17,7 +17,7 @@ This document is a plan, not a record of work done. Nothing below has been imple
 | Repo | Branch | Rule |
 |---|---|---|
 | `WattEG` | **`feat/pysceptre-backend`** (created for this work) | `main` stays the R implementation. `WattEG-paper` was written against it and every number in that paper has to remain reproducible from `main` without archaeology |
-| `pysceptre` | **`feature/watteg-simulation-support`** in `../pysceptre` (to create; matching its existing `feature/` prefix) | `pysceptre-paper` freezes pysceptre `main` for the same reason. The changes in §5 land there and merge only once the equivalence checks in §8 pass |
+| `pysceptre` | **`0.1.1rc`** in `../pysceptre` | `pysceptre-paper` freezes pysceptre `main` for the same reason. The §5 export work was done on `feature/watteg-simulation-support` and squash-merged into `0.1.1rc` as **`d96d48f`**, alongside the analytical-power work; `main` is unchanged |
 | `WattEG` | `legacy` | untouched (the Snakemake implementation) |
 
 The R path is not deleted when the Python path lands. It is the reference the Python path is
@@ -203,8 +203,11 @@ What it does **not** carry is enough cells — see §5.2, which is a blocking ga
 
 ## 5. What pysceptre must change — the export only
 
-**Status: done, on `feature/watteg-simulation-support` in `../pysceptre`** (commits `7e29efa`,
-`5117651`). Both gaps are closed and verified against the real day0 object; §5.1 and §5.2 below are
+**Status: done, in `../pysceptre` on `0.1.1rc`** — squash-merged as **`d96d48f`** ("ADD analytical
+per-pair power, per-gRNA exports, and a minimal container"), which carries the export work together
+with changes of its own. The three commits it squashes (`7e29efa`, `5117651`, `37f9d81`) survive
+only on `feature/watteg-simulation-support`, so `d96d48f` is the reference that will keep
+resolving. Both gaps are closed and verified against the real day0 object; §5.1 and §5.2 below are
 kept as the record of what they were and of what closing them turned up. §5.3 remains unbuilt, as
 planned.
 
@@ -425,8 +428,8 @@ one stage with an absolute bar rather than a relative one.
 ## 11. Phases, with a gate that can stop the work
 
 1. ~~**Export gap** (pysceptre branch): §5.1 and §5.2, plus a round-trip test that the individual
-   targeting-gRNA unions reproduce `grna_group_idxs` exactly.~~ **Done** — `7e29efa`, `5117651` on
-   `feature/watteg-simulation-support`. *Gate passed:* all 3,071 day0 targets reproduce exactly,
+   targeting-gRNA unions reproduce `grna_group_idxs` exactly.~~ **Done** — squashed into
+   `d96d48f` on `0.1.1rc`. *Gate passed:* all 3,071 day0 targets reproduce exactly,
    asserted at export time rather than in a test that can be skipped; the default read of an
    `--all-cells` export is identical to a plain one on the real screen; 230 tests green, with the
    export-format contract covered by 10 new ones that need neither R nor a real dataset; and
