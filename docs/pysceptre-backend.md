@@ -165,6 +165,40 @@ port achieves and still tight enough to catch a wrong model.
 joined by one R never needed: a theta clamped to the estimator's bounds is refused rather than
 simulated from, because here the fit happens in front of us rather than arriving in a cache.
 
+### 3.2b The simulated mean is biased low, and the fix is exact
+
+**Found while checking a report that the simulation runs 16 % low.** It does not, but it does run
+low. `row_data$mean` is 16 % below the raw mean on day0 — that much is true and expected, because
+it is a *normalised* mean — but the simulation never uses it alone: `draw_counts` forms
+`mu[i,j] = mean_i x size_factor_j x effect_size`, which puts the size factor back. With
+`mean(sf) = 1.1389` on day0 the simulated per-gene expected raw mean lands at **0.959 of the real
+one** at the median (range 0.89–1.04; 84 of 237 genes more than 5 % low, one more than 10 %).
+
+The residual is a real bias with a clean cause. `mean_i` is a **mean of ratios**,
+`(1/n) sum_j counts[i,j]/sf_j`, and
+
+    raw_mean = E[x.sf] = E[x].E[sf] + Cov(x, sf),   x = counts/sf
+
+so multiplying by `mean(sf)` drops the covariance term. It is positive here — cells with larger
+size factors still carry slightly more normalised counts, i.e. the normalisation under-corrects —
+so the simulation draws low, which biases simulated power **low**. The published sweep is
+conservative by roughly that much.
+
+**The alternative is a ratio of sums, and it is exact rather than better:**
+
+    mean_i = rowSums(counts)_i / sum_j sf_j
+
+Then `sum_j mean_i.sf_j = sum_j counts[i,j]` identically, for every gene, by construction. On day0
+it raises each gene's mean by ~4.3 %.
+
+**Not changed, pending a decision.** It moves every number the paper reports, and the port's job
+is to reproduce R first — that is what the phase-2 gate is. It is a better candidate for actually
+changing than the §5.2 question, though: that one is a judgement about which cells belong in an
+estimator, this one is an estimator that provably fails to reproduce the counts it was derived
+from, with an exact alternative available. If it is taken, it is a one-line change in
+`watteg/expression.py` and a corresponding one in `src/prepare_sim_input.R`, and both sweeps
+have to be re-run.
+
 ### 3.3 Seeding contract is preserved
 
 Today: `set.seed(derive_seed(seed, target, rep, effect_size))` before each replicate, and a separate
