@@ -196,8 +196,10 @@ The residual is a real bias with a clean cause. `mean_i` is a **mean of ratios**
 
 so multiplying by `mean(sf)` drops the covariance term. It is positive here — cells with larger
 size factors still carry slightly more normalised counts, i.e. the normalisation under-corrects —
-so the simulation draws low, which biases simulated power **low**. The published sweep is
-conservative by roughly that much.
+so the simulation draws low. **Whether that makes simulated power low is not established**, and
+the obvious inference is unsafe: the same baseline also understates the count *variance* by 13.5 %
+(§3.2c), and less variance inflates power where less expression deflates it. Two errors, opposite
+signs, neither measured against the other. Stage B under both baselines is the experiment.
 
 **The alternative is a ratio of sums, and it is exact rather than better:**
 
@@ -271,8 +273,17 @@ overstate power slightly; the present scheme is misspecified in the other direct
 neutral. "Matches the model the real data was fit with" is the more defensible starting point, but
 this is a decision about what the power analysis *means*, not a bug fix, and it is the user's.
 
-**Nothing is changed pending that decision**, and the phase-2 gate is unaffected either way: it
-asks whether the port reproduces R, and it does.
+**Taken, and implemented.** `exp(X . beta)` is the default baseline in the Python port
+(`watteg/baseline.py`), `size_factor` survives as a validation fixture so Stage B can compare
+like-for-like against sweeps produced with it, and `sim_input` format 2 carries `fitted_coefs`.
+All four phase-2 gates stay green, because the change is additive: everything the port already
+reproduced is untouched.
+
+**What this does *not* settle.** The effect on simulated power is unmeasured and not obviously
+signed, for the reason in §3.2b. Every number here is day0; the mechanism is general but the
+magnitudes are not. And the R implementation is unchanged, so the published sweeps remain on the
+old baseline — re-running them is a separate, all-or-nothing decision, since mixing the two scales
+within one analysis would be worse than either alone.
 
 ### 3.3 Seeding contract is preserved
 
