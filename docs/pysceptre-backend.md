@@ -16,14 +16,20 @@ This document is a plan, not a record of work done. Nothing below has been imple
 
 | Repo | Branch | Rule |
 |---|---|---|
-| `WattEG` | **`feat/pysceptre-backend`** (created for this work) | `main` stays the R implementation. `WattEG-paper` was written against it and every number in that paper has to remain reproducible from `main` without archaeology |
+| `WattEG` | **`feat/pysceptre-backend`** (created for this work) | `main` stays the R implementation until this branch merges |
 | `pysceptre` | **`0.1.1rc`** in `../pysceptre` | `pysceptre-paper` freezes pysceptre `main` for the same reason. The §5 export work was done on `feature/watteg-simulation-support` and squash-merged into `0.1.1rc` as **`d96d48f`**, alongside the analytical-power work; `main` is unchanged |
-| `WattEG` | **`r-implementation`** | an exact snapshot of the R pipeline at `7c07825`, pushed before `main` moved. The reference the Python path was validated against, and what the methods paper describes |
+| `WattEG` | **`r-implementation`** | the R pipeline, kept **maintained rather than frozen**. Branched from `main` at `7c07825` and since carrying the same three fixes this branch does (`d767af3`, `2b76284`, `b346296`) |
 | `WattEG` | `legacy` | untouched (the Snakemake implementation that preceded both) |
 
 The R path is not deleted when the Python path lands. It is the reference the Python path is
 measured against, and it is what the paper describes; retiring it is a separate decision, taken
 after §8 reports.
+
+**It is also not frozen.** The first instinct was to leave `r-implementation` untouched so it would
+keep reproducing the paper's numbers — but nothing has been published, so there is no obligation to
+a set of numbers, and what that would have preserved is a bug. Two of the three fixes below change
+results, and both were applied to R as well as to Python. The consequence is stated in §11b: the R
+reference Stage B compares against has to be **regenerated**, not read off the existing sweep.
 
 ## 1. What actually moves
 
@@ -663,7 +669,15 @@ Phases 1–6 are done. Phase 7 is the one that decides whether `main` moves.
 
 ## 11b. Running Stage B
 
-The reference is a power table the published sweep already produced, so no R is re-run.
+**The reference has to be regenerated.** This said the opposite until the centring bug was found,
+and reading the existing `power_sweep/` tables was the whole reason Stage B was cheap. They were
+produced by R before either fix, so they are a known-wrong reference: comparing against them would
+report a difference that is real, correctly measured, and about the bug rather than the port.
+
+That means one R run on the Stage B targets, from `r-implementation` at `b346296` or later, and a
+**re-prepare** as well as a re-simulate — the fitted baseline reads `fitted_coefs`, and no
+`sim_input.rds` made before `d767af3` carries them. Both sides then run on their own defaults,
+which is what makes the comparison a comparison of implementations.
 
 ```sh
 # 1. export the object with BOTH flags (once per dataset)
@@ -674,22 +688,30 @@ python  ../pysceptre/scripts/make_h5mu.py export/
 # 2. prepare
 watteg-prepare-sim-input --dataset export/dataset.h5mu --outdir prepared/ --n-jobs 8
 
-# 3. simulate the pairs to compare, at the REFERENCE's configuration
+# 3. simulate, on the default (fitted) baseline
 watteg-run-power-simulation \
     --prepared prepared/ --pairs <split>.tsv \
     --effect-size 0.15 --reps 100 --seed 20250812 --n-jobs 8 \
-    --expression-model size_factor \
     --out stageb_sim.tsv
 
-# 4. compare
+# 4. the R reference, from the FIXED R, on the same targets and the same defaults.
+#    Run in a worktree of r-implementation; it needs its own prepare, and its own
+#    sceptre_template.rds and null-model fits, which the Python path does not have.
+nextflow run <r-worktree> -profile <...> -params-file <...>
+
+# 5. compare
 workflow/compare_stage_b.py stageb_sim.tsv \
-    ../WattEG-paper/power_sweep/day0/day0/power/power_es0.15.tsv \
+    <r-results>/power/power_es0.15.tsv \
     --threshold-file prepared/discovery_threshold.txt
 ```
 
-**`--expression-model size_factor` is not optional here.** The published sweeps predate the
-baseline change, and the default would measure the port and the baseline change together, then
-attribute the sum to whichever one was being questioned.
+**Both sides on the default baseline.** `--expression-model size_factor` used to be mandatory here,
+to match a reference that predated the baseline change. With the reference regenerated it would do
+the opposite of its job: it would take the Python side off the model the R side is now using.
+
+**The R side can run short.** `compare_stage_b.py` computes the noise floor from each side's own
+replicate count, so R at 20 replicates against Python at 100 is a valid comparison, just a blunter
+one. Since R is the expensive side, that is where to spend less.
 
 **Cost, from the run's own timings**: `0.48s + 0.120s x pairs` per (target, replicate) at
 `--n-jobs 8`. A 36-target, 428-pair sample is about 1.9 h at 100 replicates and 23 min at 20.
@@ -714,9 +736,17 @@ one is what makes the per-pair claim worth stating.
 - **A container for the `gcb` profile.** The R image is not reusable and nothing has been built.
 
 **The one that decides whether this replaces the R path.** Stage B at full scale: one effect size,
-100 replicates, all 34,886 pairs, against `power_sweep/`. Everything measured so far says the two
-agree — but on one target, eight pairs, forty replicates. That is evidence the paths agree where
-they have been compared, and it is not the same claim.
+100 replicates, all 34,886 pairs, against a **regenerated** R sweep (§11b). Everything measured so
+far says the two agree — but on one target, eight pairs, forty replicates. That is evidence the
+paths agree where they have been compared, and it is not the same claim.
+
+Stage B's first run at 36 targets **failed**, and that failure is what found the centring bug. Two
+things follow that are easy to conflate. The first is that the failure was correct and its
+diagnosis — 27 % less replicate spread in Python, with a floor that did not shrink with cell count,
+pointing at a per-guide term — is now a **prediction**: a re-run against fixed R should show the
+spread match, and if it does not, the diagnosis was wrong rather than incomplete. The second is
+that a pass would confirm that diagnosis *and* the port at once, which is weaker than it sounds and
+worth saying out loud rather than reporting as a clean green.
 
 **Three scientific questions are open and recorded, none of them acted on** (§3.2b, §3.2c, §5.2).
 The largest, simulating from `exp(X . beta)`, has been taken; the other two are judgement calls
@@ -728,3 +758,9 @@ rather than the pipeline, and nothing in the DAG calls it. It stays in R.
 **The synthetic fixture.** `src/make_test_data.R` produces a sceptre object; the Python path needs
 a `.h5mu`, so `assets/samplesheet_synthetic.csv` points at a file nothing generates yet. The stub
 run works from a real export instead.
+
+**The numbers in `WattEG-paper`.** Both fixes change results, and every sweep in `power_sweep/` was
+produced before them, as was §4 of `perturbplan_comparison.md`. Nothing was published, so this is a
+regeneration rather than a correction — but it is a full sweep, and it is recorded in
+`WattEG-paper/docs/bug_expression_scale_input.md` rather than here because it is the paper's work,
+not the port's.

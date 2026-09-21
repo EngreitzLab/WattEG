@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Stage B: the Python pipeline's power against a published R sweep's.
+"""Stage B: the Python pipeline's power against the R pipeline's.
 
     workflow/compare_stage_b.py <python_sim.tsv> <r_power.tsv> \
         --threshold-file discovery_threshold.txt
 
 This is the comparison that decides whether the Python path can replace the R
-one, and unlike `compare_simulation.py` it does not need R re-run: the
-reference is a power table the published sweep already produced.
+one. It reads a power table rather than driving R, but that table has to come
+from a **fixed** R -- `r-implementation` at `b346296` or later -- and not from
+the pre-2026-09-21 sweeps. Those were produced before the effect-size matrix
+was centred correctly, so comparing against them measures the bug and reports
+it as a difference between implementations. Stage B's first run did exactly
+that, which is how the bug was found.
 
 **What has to match, and what cannot.** The two implementations draw from
 different random number generators, so no replicate corresponds to any other.
@@ -15,11 +19,11 @@ between two independent estimates of the same binomial proportion:
 `sqrt(p_py(1-p_py)/n_py + p_r(1-p_r)/n_r)`, computed per pair from each side's
 own replicate count rather than assumed equal.
 
-**Run the Python side with `--expression-model size_factor`.** The published
-sweeps were produced before the baseline changed to `exp(X.beta)`, and a
-comparison is only interpretable like for like. Feeding the default here would
-measure the baseline change and the port at the same time, and attribute the
-sum to whichever one was being questioned.
+**Run both sides on their own defaults.** This used to demand
+`--expression-model size_factor` on the Python side, to match a reference that
+predated the baseline change. With the reference regenerated that would invert:
+it would take Python off the model R is now using. The rule underneath has not
+changed -- compare like for like -- only which side had to move.
 
 Three things are reported, because power alone is blind in two ways:
 

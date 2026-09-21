@@ -33,9 +33,9 @@ nextflow = "*"          # the pipeline runner (the only package from bioconda)
 # commit. That is the same shape as the old SCEPTRE_SHA pin, minus the patch and the API check: the
 # pipeline calls pysceptre's documented entry points rather than reaching into its internals, so a
 # version bump is caught by this repository's own tests rather than by a bespoke checker.
-# Pinned to a commit, not the branch: a branch moves, and a sweep has to be re-runnable
-# against the engine it was produced with.
-pysceptre = { git = "https://github.com/broadinstitute/pysceptre.git", rev = "594d5ff" }
+# Pinned to a RELEASE TAG. A branch moves, and a sweep has to be re-runnable against the engine
+# that produced it; a tag says which engine that was in a form a reader can look up.
+pysceptre = { git = "https://github.com/broadinstitute/pysceptre.git", tag = "v0.2.0" }
 watteg = { path = ".", editable = true }
 
 [feature.dev.dependencies]
