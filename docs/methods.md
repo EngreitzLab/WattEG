@@ -37,33 +37,64 @@ picked at random, per replicate.
 
 ## Simulating counts
 
-For each simulation, for gene *i* and cell *j*:
+For each replicate, for gene *i* and cell *j*:
 
 ```
-mu[i, j] = mean[i] * size_factor[j] * effect_size[i, j]
-count[i, j] ~ NegBinomial(mu = mu[i, j], size = 1 / dispersion[i])
+mu[i, j]    = baseline[i, j] * effect_size[i, j]
+baseline[i, j] = exp(X[j] . beta[i])
+count[i, j] ~ NegBinomial(mu = mu[i, j], size = theta[i])
 ```
 
-where
+where `X` is the screen's covariate matrix and `beta[i]`, `theta[i]` come from **one fit** — the
+Poisson GLM plus negative-binomial theta that sceptre's own `perform_response_precomputation`
+performs, and that the null model of every discovery test is built from. Reproduced with pysceptre,
+those agree with sceptre's cached values to about ten significant digits: theta to 2.8e-12 at the
+median, and `exp(X·β)` to 9.2e-10 across 134.5 million gene × cell values.
 
-- **`mean[i]`** is the size-factor-normalised mean expression of gene *i* in the real data,
-- **`dispersion[i]`** is `1 / theta` from sceptre's own cached negative-binomial fit
-  (`@response_precomputations`), so the simulation inherits sceptre's dispersion estimates rather
-  than refitting them,
-- **`size_factor[j]`** is a DESeq2-style *poscounts* size factor, computed directly on the sparse
-  matrix (DESeq2 itself is not used — `DESeqDataSetFromMatrix()` densifies, which is untenable at
-  these dimensions).
+**The point is that the baseline is the test's own model.** A power analysis asks whether the
+screen's test would have detected an effect, so the counts it is shown should be counts from the
+model that test assumes. Taking both the level and the noise from one fit is what makes that true
+by construction rather than by coincidence.
 
-Each cell keeps **its own** size factor. The pre-refactor code shuffled the size factors across
-cells before use, on the reasoning that simulated library sizes should be a draw from the observed
-distribution rather than tied to each cell's identity. That is incorrect here: `effect_size[i, j]`
-is indexed by cell, so shuffling pairs one cell's perturbation status with a different cell's
-library size and breaks the correspondence the model assumes.
+### What this replaced, and why
 
-Genes with no cached precomputation are a hard error rather than a silent skip. The previous
+Until 2026-09-21 the baseline was `mean[i] * size_factor[j]`: a size-factor-normalised gene mean
+scaled by the cell's DESeq2 *poscounts* factor. Every published sweep used it, and
+`--expression-model size_factor` still reproduces it. Three things were wrong with it, in
+increasing order of weight.
+
+**It mixed two models.** The dispersion came from sceptre's negative binomial and the expression
+level from a DESeq2 normalisation — one simulated gene, two statistical models of the same data.
+
+**It got the level wrong**, and the error survived the size factor. `mean[i]` sits 16 % below the
+mean sceptre's model implies; multiplying by the cell's factor recovers most of that and leaves the
+simulated genes about 4 % low on day0. The residual is a dropped covariance term: `mean[i]` is a
+*mean of ratios*, and `E[x·sf] = E[x]E[sf] + Cov(x, sf)`.
+
+**It got the shape wrong, which the level hides.** sceptre's mean varies with every covariate —
+library size, detected genes, batch, replicate — while `mean[i] * size_factor[j]` varies with a
+single scalar per cell. Measured against the real counts on day0, over 60 genes and 567,690 cells:
+
+| | `mean[i] * size_factor[j]` | `exp(X·β)` |
+|---|---:|---:|
+| zero fraction, mean absolute error | 0.0053 | **0.0007** |
+| predicted variance / observed | 0.865 | **0.995** |
+
+Note the variance error pulls the **opposite** way from the level error — less variance inflates
+power where less expression deflates it — so which way the change moves simulated power is not
+obvious and has not been measured.
+
+### Two guards that are not tidiness
+
+A gene with no fitted model is a hard error rather than a silent skip. The pre-refactor
 implementation stored dispersions in a list column with `NULL` holes; `unlist()` dropped them,
-shortening the vector, and the negative-binomial draw then recycled it — so every gene after the
-first gap would have been simulated with another gene's dispersion, with no warning.
+shortening the vector, and the negative-binomial draw recycled it — so every gene after the first
+gap was simulated with another gene's dispersion, with no warning.
+
+A theta clamped to the estimator's bounds is **refused**. sceptre clamps to `[0.01, 1000]` and
+carries on, which is reasonable for an analysis; for a simulation a clamped theta is not an
+estimate of anything, and drawing counts from it would state a noise level the data never
+supported.
 
 ## Deciding whether a simulation "detects" the pair
 
