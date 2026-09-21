@@ -373,26 +373,29 @@ residual the Python port shows. So the published outputs cannot be reproduced ex
 and 1e-10 is what "reproduces R" can mean across platforms. That is a definition, not a caveat, and
 it applies to every stage below.
 
-**Stage 0 — measure the noise floor first.** The 0/265 flips `null_fit` achieved against `cleared`
-were possible only because both ran the *same* R RNG stream: identical CRT index sets, differing
-only in the null coefficients. R sceptre against pysceptre is two **independent** resampling streams
-(4,999 draws plus a skew-normal fit each), so near-threshold p-values will cross the threshold
-exactly as two R runs with different seeds do. Re-run the R panel with a second seed and record its
-own flip rate and Δpower spread. That is the bar. Every criterion below is expressed against it
-rather than against a number picked in advance.
+**No stage simulates in one language and tests in the other.** An earlier draft of this section
+had one: dump Python-simulated counts and push the same matrices through both engines, so that any
+difference was the engine alone. It is dropped, deliberately. It would have kept a working R
+install, a pinned sceptre and a matrix-handoff harness alive purely to validate the thing that
+exists to remove them, and it would have forced this pipeline's `sim_input` to carry the QC-failed
+cells R's matrices span so R could index them. The Python path simulates and tests in Python.
 
-**Stage A — isolate the engine.** Simulate counts in Python, dump the matrices (indexed to match
-`template@cells_in_use`, §5.2), and test the *same* matrices through both engines — R sceptre with
-`@response_precomputations` cleared, and pysceptre. With the simulation held fixed, any difference is
-the engine and its resampling stream.
-- Report: max |Δp|, median |Δp|, Spearman, and the **threshold-flip count** at the discovery
-  threshold — the statistic `threshold_check.R` already produces.
-- Acceptance: flip rate and |Δp| spread **inside the stage-0 floor** on the same 3-target x 53-pair
-  panel, with no directional bias in the flips. R's 7–0 against `as_is` is what bias looks like; a
-  4–3 split is not.
+What that gives up, stated plainly: nothing measures the two engines against each other **on
+simulated counts specifically**, which are denser and lower-variance than real ones. The answer
+comes by transitivity instead — pysceptre is already validated against R sceptre on this very
+screen's real discovery analysis (`test_day0_regression`: Spearman 0.9865 on p-values, fold change
+agreeing to 2.6e-12, sensitivity 0.9882 against R's own BH calls) — plus Stage B end to end and
+Stage C, which needs no second implementation at all because it has an absolute bar.
 
-**Stage B — end to end, independent runs.** Full 100 simulations at effect size 0.15, Python against
-`power_sweep/.../power_es0.15.tsv`.
+**Stage 0 — measure the noise floor first.** Two independent runs of the same correct pipeline do
+not agree pair for pair: power is a fraction over 100 Bernoulli draws, and near-threshold pairs
+cross in both directions. Re-run the **Python** pipeline at a second seed on a small panel and
+record its own Δpower spread and 0.8-line crossing count. That is the bar Stage B is read against,
+and it costs one extra short run rather than an R install.
+
+**Stage B — end to end, against R's published power.** Full 100 simulations at effect size 0.15,
+Python against `power_sweep/.../power_es0.15.tsv`. This is now the only stage that compares the two
+implementations, so it carries the weight Stage A used to share.
 - Report: per-pair Δpower distribution, the fraction exceeding each pair's Wilson half-width, the
   mean shift, and the count crossing the 0.8 line in each direction.
 - Acceptance: mean shift consistent with zero — two independent 100-draw estimates of the same
