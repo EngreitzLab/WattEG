@@ -17,6 +17,10 @@ dependencies = [
 [project.scripts]
 watteg-prepare-sim-input = "watteg.cli.prepare_sim_input:main"
 watteg-run-power-simulation = "watteg.cli.run_power_simulation:main"
+watteg-split-pairs = "watteg.cli.split_pairs:main"
+watteg-consolidate-replicates = "watteg.cli.consolidate_replicates:main"
+watteg-compute-power = "watteg.cli.compute_power:main"
+watteg-summarize-power = "watteg.cli.summarize_power:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.5"]
