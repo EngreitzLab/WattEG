@@ -23,7 +23,7 @@ suppressPackageStartupMessages(library(Matrix))
 #' by construction.
 #'
 #' `size_factor` is `mean_i * sf_j`, which is what this pipeline did until 2026-09-21. It is kept
-#' so the published sweeps can be reproduced, and for no other reason. Three things are wrong
+#' so the sweeps already run can be reproduced, and for no other reason. Three things are wrong
 #' with it, in increasing order of weight:
 #'
 #'   * It mixes two models -- the dispersion comes from sceptre's negative binomial and the level
