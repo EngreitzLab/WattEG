@@ -203,6 +203,11 @@ What it does **not** carry is enough cells — see §5.2, which is a blocking ga
 
 ## 5. What pysceptre must change — the export only
 
+**Status: done, on `feature/watteg-simulation-support` in `../pysceptre`** (commits `7e29efa`,
+`5117651`). Both gaps are closed and verified against the real day0 object; §5.1 and §5.2 below are
+kept as the record of what they were and of what closing them turned up. §5.3 remains unbuilt, as
+planned.
+
 **The constraint that shapes this whole section: the pysceptre *package* does not change.** Both
 gaps below are in `scripts/`, which pysceptre's own `CLAUDE.md` marks as *not shipped in the wheel* —
 they are dataset-export tooling, not the statistical engine. Nothing in `src/pysceptre/` is touched,
@@ -218,6 +223,20 @@ Verified gaps, not speculation.
 membership for targeting guides, and the `grna_id -> grna_target` map. Add both to the export: a
 third block of assignment rows with `unit_kind = "targeting_grna"`, and `grna_target_data_frame`
 written out whole.
+
+**What closing it turned up, and what it means for §6.** The gRNA -> target map is
+**many-to-many**: 1,673 of day0's 43,736 guides sit inside two or three *overlapping* candidate
+elements and so belong to two or three targets (45,463 design rows against 43,736 distinct ids).
+R handles this without comment — `grna_map$grna_id[grna_map$grna_target == target]` selects by
+target, so a shared guide is simply returned for both. Anything that collapses the map to one
+target per guide — a `dict`, a `match()`, the per-unit `var` annotation — drops those guides from
+every target but one, which on day0 would leave **216 of 3,071 targets simulating with an
+incomplete guide set**, silently.
+
+So `perturbation.py` must read guides-per-target from `grna_target_data_frame`, **never** from the
+gRNA assay's `var` annotation, which has one row per unit and therefore records `"<multiple>"` for
+a shared guide. The export asserts the union round-trip exhaustively over every target at write
+time, which is what caught this; all 3,071 day0 targets reproduce exactly.
 
 While the export is open: it writes only `response_id` and `grna_target` for the QC-passing pairs
 (`qc_passing_pairs`), but the R simulation output carries `n_nonzero_trt`, `n_nonzero_cntrl` and
@@ -238,6 +257,36 @@ draws from. The export writes `cells_in_use` only (`sceptre_export_lib.R:37,61,8
 Until that lands, phase 2's column-by-column gate **will** fail, and it would be easy to
 misattribute the failure to theta (§3.2). It also constrains Stage A: matrices dumped from Python
 have to be indexed the way `template@cells_in_use` expects before R can test them.
+
+**Closed by `--all-cells`, and this is what it buys.** Measured across the 18,619 cells QC removes
+on day0, computed both ways:
+
+| Quantity | Median shift | Max |
+|---|---:|---:|
+| Raw gene mean | 2.2 % | 6.2 % |
+| poscounts size factor (in-use cells) | 0.46 % | 1.3 % |
+| Size-factor-normalised gene mean | 0.36 % | 3.0 % |
+
+The file keeps **one cell space** — under `--all-cells` the matrix columns, covariate rows and
+every gRNA unit are absolute positions together — and `load_export` subsets back to `cells_in_use`
+by default, so an analysis reads either file identically and only the simulation passes
+`all_cells=True`. Verified on day0: the default read of the `--all-cells` export is identical to
+the plain one across all 92,622,239 nonzeros, the covariates, all 46,789 units and the pair table.
+
+One thing the round-trip assertion forced into the open: **gRNA membership is post-QC in both
+spaces.** `@grna_assignments` is built after QC while `@initial_grna_assignment_list` is the
+pre-QC input, so a target's guides between them cover cells the target does not — 518 against 493
+on day0's first target. The guides are restricted to `cells_in_use`, which keeps the union
+invariant true in every file and costs nothing, since those cells have no covariates and no test
+sees them. `--all-cells` therefore adds cells to the **expression side only**.
+
+**A question for phase 2, not for the port.** Whether cells QC removed *should* enter the per-gene
+geometric mean that sets the size factors is a scientific question, and the honest answer is that
+R's implementation includes them because it reads the whole matrix, not because anyone chose it.
+The port reproduces R first — that is what the phase-2 gate is for — and the table above bounds
+what the choice is worth: a 0.36 % shift in the gene mean the simulation draws from, against
+effect sizes of 5–50 %, can move power at the third decimal at most. Worth raising once the Python
+path reproduces the R one, and not before.
 
 **5.3 A shared target fit across aliased targets — considered and NOT planned.** The `target@es@rep`
 keys of §2.2 make pysceptre refit each target's binomial GLM once per replicate although the input
@@ -374,8 +423,12 @@ one stage with an absolute bar rather than a relative one.
 
 ## 11. Phases, with a gate that can stop the work
 
-1. **Export gap** (pysceptre branch): §5.1, plus a round-trip test that the individual targeting-gRNA
-   unions reproduce `grna_group_idxs` exactly. *Gate: they do.*
+1. ~~**Export gap** (pysceptre branch): §5.1 and §5.2, plus a round-trip test that the individual
+   targeting-gRNA unions reproduce `grna_group_idxs` exactly.~~ **Done** — `7e29efa`, `5117651` on
+   `feature/watteg-simulation-support`. *Gate passed:* all 3,071 day0 targets reproduce exactly,
+   asserted at export time rather than in a test that can be skipped; the default read of an
+   `--all-cells` export is identical to a plain one on the real screen; 230 tests green, with the
+   export-format contract covered by 10 new ones that need neither R nor a real dataset.
 2. **`prepare_sim_input` in Python** against the fixture: size factors, normalised means, theta,
    threshold, pairs — each compared to the R output column by column. *Gate: §3.2.*
 3. **Benchmark before committing to the shape.** 3 targets x 100 simulations on the fixture, timing
