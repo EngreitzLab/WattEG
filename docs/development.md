@@ -29,7 +29,8 @@ bump is caught by this repository's own tests rather than by a bespoke checker.
 
 The sections below describe the R implementation, which still exists in `src/*.R` and `lib/*.R` and
 is the reference the Python path was validated against. The environment that ran it is on the
-`legacy` branch.
+**`r-implementation`** branch, an exact snapshot of the pipeline as it stood before the port.
+(`legacy` is a different thing again: the Snakemake implementation that preceded both.)
 
 ### Why `ggplot2` is a build-only dependency
 

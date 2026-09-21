@@ -18,7 +18,8 @@ This document is a plan, not a record of work done. Nothing below has been imple
 |---|---|---|
 | `WattEG` | **`feat/pysceptre-backend`** (created for this work) | `main` stays the R implementation. `WattEG-paper` was written against it and every number in that paper has to remain reproducible from `main` without archaeology |
 | `pysceptre` | **`0.1.1rc`** in `../pysceptre` | `pysceptre-paper` freezes pysceptre `main` for the same reason. The §5 export work was done on `feature/watteg-simulation-support` and squash-merged into `0.1.1rc` as **`d96d48f`**, alongside the analytical-power work; `main` is unchanged |
-| `WattEG` | `legacy` | untouched (the Snakemake implementation) |
+| `WattEG` | **`r-implementation`** | an exact snapshot of the R pipeline at `7c07825`, pushed before `main` moved. The reference the Python path was validated against, and what the methods paper describes |
+| `WattEG` | `legacy` | untouched (the Snakemake implementation that preceded both) |
 
 The R path is not deleted when the Python path lands. It is the reference the Python path is
 measured against, and it is what the paper describes; retiring it is a separate decision, taken

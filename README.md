@@ -32,7 +32,9 @@ produced it.
 
 **The R implementation has not been deleted.** It is the reference the Python path was validated
 against and what the methods paper describes, and it still lives in `src/*.R` and `lib/*.R`. What
-is gone is the environment that ran it; to use it, take the `pixi.toml` from the `legacy` branch.
+is gone is the environment that ran it; to run it, use the **`r-implementation`** branch, which
+is an exact snapshot of the pipeline as it stood before the port. (`legacy` is something else
+again -- the Snakemake implementation that preceded both.)
 
 ## Input
 
