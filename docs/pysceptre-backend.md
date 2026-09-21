@@ -283,10 +283,11 @@ sees them. `--all-cells` therefore adds cells to the **expression side only**.
 **A question for phase 2, not for the port.** Whether cells QC removed *should* enter the per-gene
 geometric mean that sets the size factors is a scientific question, and the honest answer is that
 R's implementation includes them because it reads the whole matrix, not because anyone chose it.
-The port reproduces R first — that is what the phase-2 gate is for — and the table above bounds
-what the choice is worth: a 0.36 % shift in the gene mean the simulation draws from, against
-effect sizes of 5–50 %, can move power at the third decimal at most. Worth raising once the Python
-path reproduces the R one, and not before.
+The port reproduces R first — that is what the phase-2 gate is for — and the table above is the
+order-of-magnitude argument for deferring it: a 0.36 % shift in the gene mean the simulation draws
+from, against effect sizes of 5–50 %. That is an estimate, not a measurement — `as_is` shifted
+mean power by +0.0063 from coefficient differences far larger than this, so the direction is right
+and the size is not established. Measure it once the Python path reproduces the R one.
 
 **5.3 A shared target fit across aliased targets — considered and NOT planned.** The `target@es@rep`
 keys of §2.2 make pysceptre refit each target's binomial GLM once per replicate although the input
