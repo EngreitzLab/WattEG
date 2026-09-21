@@ -162,10 +162,25 @@ both implementations alike, and it is the gene the two differ on most.
 `workflow/compare_dispersion.py` is the gate, at a tolerance of 1e-6 — generous against what the
 port achieves and still tight enough to catch a wrong model.
 `build_dispersion_vector`'s hard error on missing/non-finite dispersions carries over, and is
-joined by one R never needed: a theta clamped to the estimator's bounds is refused rather than
-simulated from, because here the fit happens in front of us rather than arriving in a cache.
+joined by one **deliberate deviation**: a theta clamped to the estimator's bounds is refused rather
+than simulated from. sceptre clamps to exactly the same `[0.01, 1000]` that pysceptre does
+(`perform_response_precomputation`: `max(min(theta, 1000), 0.01)`) and carries on, so R would
+proceed where this stops. For an *analysis* that is reasonable; for a *simulation* a clamped theta
+is not an estimate of anything, and drawing counts from it would state a noise level the data never
+supported. Day0 has no clamped gene, so nothing is refused today.
 
 ### 3.2b The simulated mean is biased low, and the fix is exact
+
+**sceptre is not involved, and this is the first thing to establish.** sceptre computes no size
+factor, no geometric mean and no normalised mean — searching all 183 of its functions for
+`size_factor|geomean|normaliz|offset` returns nothing — and its per-gene model is
+`glm.fit(y = counts, x = covariate_matrix, family = poisson())` with no offset. Library size enters
+it as ordinary covariates, `log(response_n_umis)` and `log(response_n_nonzero)`, which the GLM fits
+coefficients for. The size factors and `row_data$mean` are **WattEG's simulation machinery alone**,
+inherited from the original DC_TAP_Paper power simulation; they exist to generate synthetic counts
+and sceptre never sees them. DESeq2 is not doing it wrong either — mean-of-ratios is exactly what
+its `baseMean` is, and as a summary statistic it is fine. What follows is about one *composition*,
+which is WattEG's own.
 
 **Found while checking a report that the simulation runs 16 % low.** It does not, but it does run
 low. `row_data$mean` is 16 % below the raw mean on day0 — that much is true and expected, because
