@@ -152,7 +152,7 @@ sweep, not as another point on a curve.
 **`--expression-model`.** `fitted` draws from `exp(X·β)`, the expected count sceptre's own null
 model gives that cell, so the simulation and the test that judges it are on one scale.
 `size_factor` reproduces the pre-2026-09-21 behaviour — a size-factor-normalised gene mean scaled
-by the cell's poscounts factor — and exists only to compare against sweeps produced with it. It
+by the cell's poscounts factor — and exists only to compare against sweeps already run with it. It
 mixes two models, runs about 4 % low, and reproduces 86.5 % of the observed count variance against
 the fitted model's 99.5 %.
 

@@ -225,7 +225,7 @@ sample — and they are regenerable: the bin packing is deterministic given `pai
 
 - **`mean`** — size-factor normalised. The simulation drew counts from this until 2026-09-21; it
   now draws from `exp(X·β)` instead, and `mean` is kept because `--expression-model size_factor`
-  reproduces the published sweeps.
+  reproduces the sweeps that were run on it.
 - **`average_expression_all_cells`** — raw. Reported in the output so power can be related to
   expression level.
 

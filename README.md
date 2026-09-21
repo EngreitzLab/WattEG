@@ -32,9 +32,13 @@ produced it.
 
 **The R implementation has not been deleted.** It is the reference the Python path was validated
 against and what the methods paper describes, and it still lives in `src/*.R` and `lib/*.R`. What
-is gone is the environment that ran it; to run it, use the **`r-implementation`** branch, which
-is an exact snapshot of the pipeline as it stood before the port. (`legacy` is something else
-again -- the Snakemake implementation that preceded both.)
+is gone is the environment that ran it; to run it, use the **`r-implementation`** branch.
+
+That branch is **maintained, not frozen**. Two bugs found during the port change results, and both
+were fixed in R as well as in Python rather than being quarantined on a snapshot -- nothing was
+published, so there were no numbers owed a bit-for-bit reproduction, and freezing the branch would
+only have preserved the bugs. Sweeps produced before 2026-09-21 predate both fixes.
+(`legacy` is something else again -- the Snakemake implementation that preceded both.)
 
 ## Input
 

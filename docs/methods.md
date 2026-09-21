@@ -59,7 +59,7 @@ by construction rather than by coincidence.
 ### What this replaced, and why
 
 Until 2026-09-21 the baseline was `mean[i] * size_factor[j]`: a size-factor-normalised gene mean
-scaled by the cell's DESeq2 *poscounts* factor. Every published sweep used it, and
+scaled by the cell's DESeq2 *poscounts* factor. Every sweep run before then used it, and
 `--expression-model size_factor` still reproduces it. Three things were wrong with it, in
 increasing order of weight.
 

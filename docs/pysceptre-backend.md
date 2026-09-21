@@ -288,11 +288,14 @@ reproduced is untouched.
 
 **What this does *not* settle.** The effect on simulated power is unmeasured and not obviously
 signed, for the reason in §3.2b. Every number here is day0; the mechanism is general but the
-magnitudes are not. And the R implementation is unchanged, so the published sweeps remain on the
-old baseline — re-running them is a separate, all-or-nothing decision, since mixing the two scales
-within one analysis would be worse than either alone. What that decision costs, concretely: every
-`power_summary.tsv` moves — `day0` at six effect sizes, `moi5` cis at six, and the 742,525-pair
-`moi5` trans sweep at one.
+magnitudes are not. And the existing sweeps were run on the old baseline, so re-running them is a
+separate, all-or-nothing decision: mixing the two scales within one analysis would be worse than
+either alone. What that decision costs, concretely: every `power_summary.tsv` moves — `day0` at six
+effect sizes, `moi5` cis at six, and the 742,525-pair `moi5` trans sweep at one.
+
+**That decision has since been taken, for a different reason.** The R implementation is *not*
+unchanged: it carries this baseline (`d767af3`) and the centring fix (`2b76284`), so the sweeps have
+to be regenerated regardless of how this question alone would have been decided. See §11b.
 
 Both per-gene means survive the change on purpose. `sim_input.h5` carries `fitted_coefs` *and*
 `mean`, so an existing output can be audited against the scale that produced it without
@@ -498,7 +501,7 @@ configuration that §3.1 reproduces. `power_sweep_null/` holds `power_es0.0.tsv`
 **es = 0 null arm**, not the `null_fit` configuration. Stage B reads `power_sweep/`; Stage C reads
 `power_sweep_null/`.
 
-**"Reproduce R" has a floor that is not the port's doing.** The published sweeps ran on an x86
+**"Reproduce R" has a floor that is not the port's doing.** The existing sweeps ran on an x86
 cluster, where R's `sum()` accumulates in 80-bit `LDOUBLE`; on arm64 `.Machine$sizeof.longdouble`
 is 8 and it accumulates in plain `double`. Measured in phase 2: **a local R run reproduces only 30
 of 20,000 published size factors bit for bit**, and differs from them by up to 6.2e-12 — the same
@@ -624,7 +627,7 @@ one stage with an absolute bar rather than a relative one.
    export changes move nothing the engine reads.
 2. ~~**`prepare_sim_input` in Python** against the fixture: size factors, normalised means, theta,
    threshold, pairs — each compared to the R output column by column.~~ **Done.** *Gate passed*
-   against the day0 `sim_input.rds` the published sweep ran on: `pairs.tsv`, `grna_targets.tsv`
+   against the day0 `sim_input.rds` the day0 sweep was run on: `pairs.tsv`, `grna_targets.tsv`
    and `discovery_threshold.txt` **byte-identical**; genes the same set in the same order; all
    3,071 target and 43,718 guide cell sets agreeing exactly; and the expression statistics
    **bit-identical to a same-platform R run**, differing from the published ones only by the

@@ -10,7 +10,7 @@
 # Usage:
 #   workflow/dump_r_sim_input.R <sim_input.rds> <out_dir>
 #
-# The reference used for day0 is the sim_input the published sweep ran on:
+# The reference used for day0 is the sim_input the day0 sweep was run on:
 #   WattEG-paper/power_sweep/day0/day0/prepared/sim_input.rds
 
 suppressPackageStartupMessages(library(Matrix))

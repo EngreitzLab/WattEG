@@ -2,7 +2,7 @@
 """Phase 2's gate: the Python expression statistics against R's own output.
 
 R's reference is a `sim_input.rds` dumped by `workflow/dump_r_sim_input.R` --
-for day0, the one the published sweep actually ran on. Python reads the
+for day0, the one the day0 sweep was actually run on. Python reads the
 `--all-cells` pysceptre export of the same sceptre object, so both sides see the
 same counts over the same 586,309 cells and any difference is the arithmetic.
 

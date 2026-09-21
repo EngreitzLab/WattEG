@@ -87,7 +87,7 @@ Two settings deserve a warning, both documented in
 - **`alpha`** should normally be left unset so the threshold is derived from the real discovery
   results, which reflects the multiple-testing correction actually applied.
 - **`expression_model`** should be left at `fitted`. `size_factor` exists only to reproduce sweeps
-  published before 2026-09-21; it mixes two statistical models of the same data and reproduces
+  produced before 2026-09-21; it mixes two statistical models of the same data and reproduces
   86.5% of the observed count variance against the fitted model's 99.5%.
 
 `n_control_cells` and `cell_batches` are gone. They sampled control cells to buy speed, cost 21-60%
