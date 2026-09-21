@@ -10,9 +10,15 @@
 ##   genes     character, gene ids (was rownames(sce))
 ##   cells     character, cell barcodes (was colnames(sce))
 ##   row_data  data.frame, one row per gene, rownames == genes
-##               mean                          size-factor-normalised mean, drives simulation
+##               mean                          size-factor-normalised mean; drives the simulation
+##                                             only under the legacy `size_factor` baseline
 ##               dispersion                    1/theta from sceptre's cached precomputations
 ##               average_expression_all_cells  raw mean, reported in the output only
+##   fitted_coefs  matrix, genes x covariates, rownames == genes
+##               sceptre's own Poisson-GLM coefficients for the gene, from
+##               @response_precomputations. exp(coefs %*% t(covariate_matrix)) is the expected
+##               count the discovery test's null model gives each cell, and is what the
+##               simulation draws from. See baseline_expression() in simulate.R.
 ##   col_data  data.frame, one row per cell, aligned to `cells` by position (no rownames)
 ##               size_factors                  poscounts size factors
 ##               <categorical covariates>      factors, e.g. batch_factor, replicate_factor;
@@ -35,13 +41,14 @@ suppressPackageStartupMessages(library(Matrix))
 
 PERT_LEVELS <- c("grna_perts", "cre_perts")
 
-new_sim_input <- function(genes, cells, row_data, col_data, perts) {
+new_sim_input <- function(genes, cells, row_data, col_data, perts, fitted_coefs = NULL) {
   x <- list(
     genes = as.character(genes),
     cells = as.character(cells),
     row_data = row_data,
     col_data = col_data,
-    perts = perts
+    perts = perts,
+    fitted_coefs = fitted_coefs
   )
   class(x) <- "sim_input"
   validate_sim_input(x)
@@ -68,6 +75,22 @@ validate_sim_input <- function(x) {
   if (nrow(x$col_data) != length(x$cells)) {
     stop("sim_input$col_data has ", nrow(x$col_data), " rows but there are ", length(x$cells),
          " cells.", call. = FALSE)
+  }
+
+  # Optional only so that a sim_input written before the fitted baseline existed still loads;
+  # run_power_simulation.R refuses to use the fitted model without it rather than falling back
+  # silently to a different one.
+  if (!is.null(x$fitted_coefs)) {
+    if (!is.matrix(x$fitted_coefs)) {
+      stop("sim_input$fitted_coefs must be a matrix.", call. = FALSE)
+    }
+    if (!identical(rownames(x$fitted_coefs), x$genes)) {
+      stop("sim_input$fitted_coefs rownames must equal sim_input$genes, in the same order.",
+           call. = FALSE)
+    }
+    if (any(!is.finite(x$fitted_coefs))) {
+      stop("sim_input$fitted_coefs has non-finite entries.", call. = FALSE)
+    }
   }
 
   required_row <- c("mean", "dispersion", "average_expression_all_cells")
@@ -125,6 +148,9 @@ subset_genes <- function(x, genes) {
   }
   x$genes <- as.character(genes)
   x$row_data <- x$row_data[x$genes, , drop = FALSE]
+  if (!is.null(x$fitted_coefs)) {
+    x$fitted_coefs <- x$fitted_coefs[x$genes, , drop = FALSE]
+  }
   x
 }
 
@@ -177,6 +203,9 @@ print.sim_input <- function(x, ...) {
   cat("sim_input:", n_genes(x), "genes x", n_cells(x), "cells\n")
   cat("  row_data:", paste(colnames(x$row_data), collapse = ", "), "\n")
   cat("  col_data:", paste(colnames(x$col_data), collapse = ", "), "\n")
+  cat("  fitted_coefs:",
+      if (is.null(x$fitted_coefs)) "absent (legacy sim_input)" else
+        paste(ncol(x$fitted_coefs), "covariates"), "\n")
   for (level in names(x$perts)) {
     cat("  perts$", level, ": ", nrow(x$perts[[level]]), " rows\n", sep = "")
   }

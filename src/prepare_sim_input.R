@@ -292,6 +292,14 @@ log_step("Genes kept: ", length(genes), " of ", length(all_genes),
 # with NULL holes here, which unlist() silently dropped, shifting every later gene's dispersion.
 dispersion <- build_dispersion_vector(so@response_precomputations, genes)
 
+# The other half of the same fit. Both are read here, before slim_sceptre_object() clears the
+# slot: the dispersion sets how noisy a simulated gene is and the coefficients set how expressed
+# it is, and taking them from one model is what keeps the simulation on the scale the discovery
+# test works on. See baseline_expression() in lib/simulate.R.
+fitted_coefs <- build_fitted_coefs_matrix(so@response_precomputations, genes)
+log_step("Fitted coefficients: ", nrow(fitted_coefs), " genes x ", ncol(fitted_coefs),
+         " covariates (", paste(utils::head(colnames(fitted_coefs), 3), collapse = ", "), ", ...)")
+
 gene_idx <- match(genes, all_genes)
 row_data <- data.frame(
   mean = stats_out$normalized_mean[gene_idx],
@@ -366,7 +374,8 @@ sim <- new_sim_input(
   cells = cells,
   row_data = row_data,
   col_data = col_data,
-  perts = list(grna_perts = grna_perts, cre_perts = cre_perts)
+  perts = list(grna_perts = grna_perts, cre_perts = cre_perts),
+  fitted_coefs = fitted_coefs
 )
 print(sim)
 
