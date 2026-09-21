@@ -16,7 +16,7 @@ One row per element–gene pair, one set of columns per effect size.
 | `mean_pert_cells` | Mean number of perturbed cells across replicates. |
 | `average_expression_all_cells` | Raw mean expression of the gene across all cells. Not size-factor normalised — see the note below. |
 | `gene_mean` | The gene's size-factor-normalised mean (`mu`). Present only when `--sim-input` was supplied. **Not the same as `average_expression_all_cells`**: they correlate at r = 0.9999 but differ by a scale factor, and `mu` is the one the theory below uses. |
-| `dispersion` | The gene's negative-binomial dispersion, **`1/theta`** rather than `theta` — the same convention `sim_input.rds` and `rnbinom(size = 1/dispersion)` use. Present only when `--sim-input` was supplied. |
+| `dispersion` | The gene's negative-binomial dispersion, **`1/theta`** rather than `theta` — the same convention `sim_input.h5` and `NegBinomial(size = 1/dispersion)` use. Present only when `--sim-input` was supplied. |
 | `power_at_effect_size_15` | Power at a 15% knockdown. One column per effect size; the suffix is `effect_size × 100`, with any decimal point written as an underscore (0.125 → `power_at_effect_size_12_5`). |
 | `power_at_effect_size_15_ci_low`, `_ci_high` | 95% Wilson interval for that estimate. |
 | `power_at_effect_size_15_n_reps` | Simulations contributing to it. |
@@ -56,12 +56,12 @@ SE^2 ~ (1 / n_pert_cells) * (1 / mu + 1 / theta)
 
 so anything that models power from covariates needs the gene's dispersion alongside its expression
 and the perturbed-cell count. Until these columns existed, only `average_expression_all_cells`
-reached this table and every such analysis had to load a 16 MB `sim_input.rds` to find the rest.
+reached this table and every such analysis had to load a separate `sim_input.h5` to find the rest.
 
 With the convention above, the bracket is `1/gene_mean + dispersion` — no conversion, because
 `dispersion` already *is* `1/theta`.
 
-They are joined by `summarize_power.R` at summary time rather than emitted per simulation, because
+They are joined by `watteg-summarize-power` at summary time rather than emitted per simulation, because
 they are per-gene constants: putting them in the simulation output would only help sweeps run after
 the change, while re-summarising an existing sweep from its stored power tables takes seconds. Both
 columns are absent if `--sim-input` is not passed, so older outputs and hand-run summaries are
@@ -181,7 +181,7 @@ One row per (pair, simulation), gzipped. This is the only output from which powe
 | `p_value` | From the resampling test on this simulation's simulated counts. |
 | `log_2_fold_change` | Its effect estimate. Power counts a simulation only when `p_value` beats the discovery threshold **and** this is negative. |
 | `rep` | Simulation index, unique across chunks thanks to `--rep-offset`. |
-| `effect_size` | The effect size simulated. Constant within a file, and kept because `compute_power.R` uses it to refuse an input that mixes effect sizes. |
+| `effect_size` | The effect size simulated. Constant within a file, and kept because `watteg-compute-power` uses it to refuse an input that mixes effect sizes. |
 | `num_pert_cells` | Perturbed cells for this target. |
 | `pass_qc`, `n_nonzero_trt`, `n_nonzero_cntrl` | Diagnostics, carried over from the **real** discovery pairs rather than recomputed from simulated data — they describe the observed experiment. |
 
@@ -192,24 +192,28 @@ pairs × 6 effect sizes they were 39 % of a 3 GB output and nothing read them:
 |---|---|
 | `fold_change` | It is `2^log_2_fold_change` — the same number twice. |
 | `se_fold_change` | Read by nothing downstream. |
-| `significant` | sceptre's own call at *its* threshold, not the discovery threshold this pipeline tests against. `compute_power.R` recomputes it, so keeping the column invited the wrong one being believed. |
-| `average_expression_all_cells` | A per-*gene* constant that was repeated once per replicate. `summarize_power.R --sim-input` joins it from `sim_input.rds`, where it is stored once. |
+| `significant` | sceptre's own call at *its* threshold, not the discovery threshold this pipeline tests against. `watteg-compute-power` recomputes it, so keeping the column invited the wrong one being believed. |
+| `average_expression_all_cells` | A per-*gene* constant that was repeated once per replicate. `watteg-summarize-power --sim-input` joins it from `sim_input.h5`, where it is stored once. |
 
 Together with gzip that takes the per-simulation output from ~3 GB to a few hundred MB for a
 six-point sweep at 100 replicates. Nothing needs a decompression step: `read.delim` sniffs the
-magic number and handles `.tsv.gz` and `.tsv` alike, and `compute_power.R` accepts either.
+magic number and handles `.tsv.gz` and `.tsv` alike, and `watteg-compute-power` accepts either.
 
 ## Intermediates
 
 | File | Contents |
 |---|---|
-| `sim_input.rds` | Per-gene `mean`, `dispersion`, `average_expression_all_cells`; per-cell `size_factors` and categorical covariates; the gRNA and target perturbation matrices. No count matrix — the simulation draws counts rather than reading them. |
-| `sceptre_template.rds` | The sceptre object with `@response_matrix` and `@grna_matrix` emptied. Neither is read by the discovery analysis once gRNAs are assigned. |
+| `sim_input.h5` | Per-gene `mean`, `dispersion`, `average_expression_all_cells` and the model coefficients; per-cell `size_factors`; the covariate matrix; the gRNA and target perturbation matrices; and `cells_in_use`, each simulated cell's position in the original object. No count matrix — the simulation draws counts rather than reading them. |
 | `pairs.tsv` | `grna_target`, `response_id` for QC-passing pairs only. |
-| `grna_targets.tsv` | `grna_id`, `grna_target`. |
-| `discovery_threshold.txt` | A single number: the p-value a simulation must beat. |
-| `analysis_mode.tsv` | `resampling_mechanism` (`crt` or `permutations`), `run_permutations`, and `moi`. Which test produced these power numbers. |
-| `null_precomputations.rds` | Per-gene null models, one set per simulation, fitted on a null simulation. |
+| `pairs_with_info.tsv` | Every discovery pair with `n_nonzero_trt`, `n_nonzero_cntrl` and `pass_qc` from the real data. Constant across replicates, and the first thing to look at when a pair's power is surprising. |
+| `grna_targets.tsv` | `grna_id`, `grna_target`. **Many-to-many**: a guide inside two overlapping candidate elements appears once per target, and this is the only place that mapping is recorded faithfully. |
+| `discovery_threshold.txt` | A single number: the p-value a replicate must beat. |
+| `analysis_mode.tsv` | The resampling mechanism, the MOI, the side, the `B1`/`B2`/`B3` budget and the multiple-testing alpha — the screen's own analysis parameters, so which test produced these numbers is readable without opening anything. |
+
+There is no `sceptre_template.rds`: it was an R object carrying the covariate matrix and the
+analysis parameters, which are in `sim_input.h5` and `analysis_mode.tsv`. There is no
+`null_precomputations.rds` either — the per-gene null is fitted on each replicate's own simulated
+counts, which is what that file existed to approximate.
 
 `split_*.tsv` is **not published**. The splits are parallelisation bookkeeping — 1,000 files per
 sample — and they are regenerable: the bin packing is deterministic given `pairs.tsv` and
@@ -217,10 +221,14 @@ sample — and they are regenerable: the bin packing is deterministic given `pai
 
 ## Two means, deliberately
 
-`sim_input.rds` carries two per-gene means and they are not interchangeable:
+`sim_input.h5` carries two per-gene means and they are not interchangeable:
 
-- **`mean`** — size-factor normalised. This is what the simulation draws counts from.
+- **`mean`** — size-factor normalised. The simulation drew counts from this until 2026-09-21; it
+  now draws from `exp(X·β)` instead, and `mean` is kept because `--expression-model size_factor`
+  reproduces the published sweeps.
 - **`average_expression_all_cells`** — raw. Reported in the output so power can be related to
   expression level.
 
-Only the raw one appears in the output tables.
+Only the raw one appears in the output tables. The two differ by more than a rounding: on day0 the
+normalised mean sits 16 % below the raw one, which is what a normalisation does and is also why
+feeding the wrong one to anything expecting counts is a scale error rather than a small one.
