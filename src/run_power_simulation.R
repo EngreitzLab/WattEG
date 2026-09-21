@@ -69,6 +69,16 @@ option_list <- list(
               help = paste("Number of reps already covered by earlier chunks. The reported `rep`",
                            "column is rep_offset + 1..reps, keeping it unique across chunks",
                            "[default %default].")),
+  make_option("--expression-model", type = "character", default = "fitted",
+              dest = "expression_model",
+              help = paste("Where a gene's unperturbed expected counts come from.",
+                           "'fitted' (default) uses exp(X %%*%% coefs) from sceptre's own null",
+                           "model, so the simulation and the test that judges it are on one",
+                           "scale. 'size_factor' uses mean_i * sf_j, which is what this pipeline",
+                           "did before 2026-09-21; it mixes two models, runs about 4%% low and",
+                           "reproduces only 86.5%% of the observed count variance against the",
+                           "fitted model's 99.5%%. Keep it only to reproduce published sweeps.",
+                           "See baseline_expression() in lib/simulate.R.")),
   make_option("--guide-sd", type = "double", default = 0.13, dest = "guide_sd",
               help = paste("Standard deviation of the per-gRNA effect size around the target",
                            "effect size, i.e. guide-to-guide variability [default %default].",
@@ -128,6 +138,10 @@ if (opts$effect_size < 0 || opts$effect_size >= 1) {
        opts$effect_size, "); 0 is the null arm.", call. = FALSE)
 }
 if (opts$reps < 1) stop("--reps must be at least 1.", call. = FALSE)
+if (!opts$expression_model %in% c("fitted", "size_factor")) {
+  stop("--expression-model must be 'fitted' or 'size_factor' (got ", opts$expression_model, ").",
+       call. = FALSE)
+}
 if (!is.null(opts$cell_batches) && is.null(opts$n_control_cells)) {
   stop("--cell-batches only applies when --n-control-cells is set.", call. = FALSE)
 }
@@ -221,12 +235,20 @@ targets <- unique(split_pairs$grna_target)
 log_step("Split covers ", length(targets), " targets / ", nrow(split_pairs), " pairs")
 log_step("Effect size ", opts$effect_size, " (relative expression ", relative_expression,
          "), reps ", opts$rep_offset + 1L, "-", opts$rep_offset + opts$reps)
+log_step("Expression model: ", opts$expression_model,
+         if (opts$expression_model == "size_factor")
+           " (legacy: mixes two models and runs ~4% low -- see lib/simulate.R)" else
+           " (exp(X %*% coefs), sceptre's own null model)")
 if (!is.null(opts$n_control_cells)) {
   log_step("Sampling ", opts$n_control_cells, " control cells per target",
            if (!is.null(opts$cell_batches)) paste0(" stratified by ", opts$cell_batches) else "")
 }
 
 ## SIMULATE ========================================================================================
+
+# Resolved once: matching 586,309 barcodes per target would cost more than the simulation.
+# Only read when control cells are sampled, which is the one path that reorders them.
+all_cell_names <- rownames(template@covariate_data_frame)
 
 results <- vector("list", length(targets) * opts$reps)
 result_idx <- 0L
@@ -279,6 +301,17 @@ for (target in targets) {
   restore_cell_order <- order(cell_order(pert_status))
 
   gene_object <- subset_genes(pert_object, target_pairs$response_id)
+
+  # The unperturbed expected counts, computed once per target: they depend on neither the effect
+  # size nor the draw, so recomputing them inside the rep loop would be the same arithmetic 100
+  # times over. The covariate rows are aligned to this object's cells -- identical to the
+  # template's own order unless control cells were sampled, which reorders and subsets them.
+  target_covariates <- if (is.null(opts$n_control_cells)) {
+    template@covariate_matrix
+  } else {
+    template@covariate_matrix[match(gene_object$cells, all_cell_names), , drop = FALSE]
+  }
+  baseline <- baseline_expression(gene_object, target_covariates, model = opts$expression_model)
   effect_sizes <- stats::setNames(
     rep(relative_expression, length(gene_object$genes)), gene_object$genes
   )
@@ -348,7 +381,7 @@ for (target in targets) {
                                        gene_effect_sizes = effect_sizes)
     es_mat <- es_mat[, restore_cell_order, drop = FALSE]
 
-    counts <- draw_counts(gene_object, es_mat)
+    counts <- draw_counts(gene_object, es_mat, baseline)
 
     sceptre_use <- target_template
     sceptre_use@response_matrix <- list(as_sceptre_response_matrix(counts, report_density = FALSE))

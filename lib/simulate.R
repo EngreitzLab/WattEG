@@ -13,32 +13,92 @@
 
 suppressPackageStartupMessages(library(Matrix))
 
+#' A gene's expected counts per cell, before any perturbation.
+#'
+#' This decides what "unperturbed" means, and therefore what power is measured against. There
+#' are two ways to produce it and they are not equivalent.
+#'
+#' `fitted` (the default) is `exp(X %*% coefs)`: the expected count sceptre's own null model
+#' gives that cell for that gene, so the simulation and the test that judges it are on one scale
+#' by construction.
+#'
+#' `size_factor` is `mean_i * sf_j`, which is what this pipeline did until 2026-09-21. It is kept
+#' so the published sweeps can be reproduced, and for no other reason. Three things are wrong
+#' with it, in increasing order of weight:
+#'
+#'   * It mixes two models -- the dispersion comes from sceptre's negative binomial and the level
+#'     from a DESeq2-style normalisation, for the same gene.
+#'   * It gets the level wrong. `row_data$mean` sits 16 % below the mean sceptre's model implies;
+#'     multiplying by the size factor recovers most of that and leaves the simulated genes about
+#'     4 % low on day0. The residual is a dropped covariance term: `mean_i` is a mean of ratios,
+#'     and `E[x*sf] = E[x]E[sf] + Cov(x, sf)`.
+#'   * It gets the SHAPE wrong, which the level hides. sceptre's mean varies with every covariate;
+#'     `mean_i * sf_j` varies with one scalar per cell. Measured against the real counts on day0
+#'     over 60 genes and 567,690 cells, the fitted baseline predicts the zero fraction to 0.0007
+#'     against 0.0053, and 99.5 % of the observed count variance against 86.5 %.
+#'
+#' Note the variance error pulls the OPPOSITE way from the level error -- less variance inflates
+#' power where less expression deflates it -- so which way the change moves power is not obvious
+#' and has not been measured.
+#'
+#' @param x sim_input, already subset to the genes and cells being simulated
+#' @param covariate_matrix cells x covariates, rows aligned to x$cells. Required by `fitted`.
+#' @return a dense genes x cells matrix of expected counts
+baseline_expression <- function(x, covariate_matrix = NULL,
+                                model = c("fitted", "size_factor")) {
+  model <- match.arg(model)
+  if (model == "size_factor") {
+    # outer() replaces the original matrix(rep(...)) + sweep() pair: same values, one allocation
+    # instead of three.
+    return(outer(x$row_data$mean, x$col_data$size_factors))
+  }
+
+  if (is.null(x$fitted_coefs)) {
+    stop("This sim_input carries no fitted_coefs, so the 'fitted' baseline cannot be formed. ",
+         "Re-run prepare_sim_input.R, or pass --expression-model size_factor to reproduce the ",
+         "pre-2026-09-21 behaviour.", call. = FALSE)
+  }
+  if (is.null(covariate_matrix)) {
+    stop("The 'fitted' baseline needs the covariate matrix.", call. = FALSE)
+  }
+  if (nrow(covariate_matrix) != length(x$cells)) {
+    stop("covariate_matrix has ", nrow(covariate_matrix), " rows but there are ",
+         length(x$cells), " cells; they must be aligned.", call. = FALSE)
+  }
+  if (ncol(covariate_matrix) != ncol(x$fitted_coefs)) {
+    stop("covariate_matrix has ", ncol(covariate_matrix), " columns but fitted_coefs has ",
+         ncol(x$fitted_coefs), "; they come from different designs.", call. = FALSE)
+  }
+  # tcrossprod(A, B) is A %*% t(B): (genes x p) against (cells x p) gives genes x cells.
+  exp(tcrossprod(x$fitted_coefs, covariate_matrix))
+}
+
 #' Simulate counts for one perturbation.
 #'
 #' @param x sim_input, already subset to the genes being tested
 #' @param effect_size_mat genes x cells multiplier, columns in the same order as x$cells
+#' @param baseline genes x cells expected counts from baseline_expression(). Computed once per
+#'   target rather than once per simulation: it does not depend on the effect size or the draw.
 #' @return a dense genes x cells matrix of counts
-draw_counts <- function(x, effect_size_mat) {
-  gene_means <- x$row_data$mean
+draw_counts <- function(x, effect_size_mat, baseline) {
   gene_dispersions <- x$row_data$dispersion
-  size_factors <- x$col_data$size_factors
 
-  n_gene <- length(gene_means)
-  n_cell <- length(size_factors)
+  n_gene <- length(gene_dispersions)
+  n_cell <- length(x$cells)
 
   if (!identical(dim(effect_size_mat), c(n_gene, n_cell))) {
     stop("effect_size_mat is ", paste(dim(effect_size_mat), collapse = " x "),
          " but ", n_gene, " x ", n_cell, " was expected.", call. = FALSE)
   }
+  if (!identical(dim(baseline), c(n_gene, n_cell))) {
+    stop("baseline is ", paste(dim(baseline), collapse = " x "),
+         " but ", n_gene, " x ", n_cell, " was expected.", call. = FALSE)
+  }
 
-  # Cell-to-cell variability. Each cell keeps its own size factor: the effect-size matrix is
-  # indexed by cell, so shuffling would pair one cell's perturbation status with another cell's
-  # library size.
-  #
-  # mu[i, j] = gene_means[i] * size_factor[j] * effect_size[i, j].
-  # outer() replaces the original matrix(rep(...)) + sweep() pair: same values, one allocation
-  # instead of three.
-  mu <- outer(gene_means, size_factors) * effect_size_mat
+  # mu[i, j] = baseline[i, j] * effect_size[i, j]. Each cell keeps its own baseline: the
+  # effect-size matrix is indexed by cell, so shuffling would pair one cell's perturbation status
+  # with another cell's expected expression.
+  mu <- baseline * effect_size_mat
 
   # size = theta = 1 / dispersion. mu is consumed column-major, and `size` recycles over the
   # gene index, which is why gene_dispersions must be exactly n_gene long -- see
@@ -126,6 +186,37 @@ build_dispersion_vector <- function(precomputations, genes) {
   }
 
   stats::setNames(dispersion, genes)
+}
+
+#' Build the per-gene coefficient matrix from sceptre's cached precomputations.
+#'
+#' The sibling of build_dispersion_vector(), reading the other half of the same fit. Taking both
+#' from one fit is the point: until 2026-09-21 the dispersion came from sceptre's negative
+#' binomial and the expression level from a DESeq2-style normalisation, so a simulated gene's
+#' noise and its level came from different models of the same data.
+#'
+#' @param precomputations sceptre_object@response_precomputations
+#' @param genes genes to build the matrix for
+#' @return genes x covariates matrix, rownames == genes
+build_fitted_coefs_matrix <- function(precomputations, genes) {
+  missing_genes <- setdiff(genes, names(precomputations))
+  if (length(missing_genes) > 0) {
+    stop(length(missing_genes), " gene(s) have no entry in @response_precomputations and so no ",
+         "fitted coefficients, including: ",
+         paste(utils::head(missing_genes, 5), collapse = ", "),
+         ". Re-run sceptre's precomputation, or drop these genes from the discovery pairs.",
+         call. = FALSE)
+  }
+
+  coefs <- do.call(rbind, lapply(precomputations[genes], function(p) p$fitted_coefs))
+  rownames(coefs) <- genes
+
+  if (any(!is.finite(coefs))) {
+    bad <- genes[apply(!is.finite(coefs), 1, any)]
+    stop(length(bad), " gene(s) have a non-finite fitted coefficient, including: ",
+         paste(utils::head(bad, 5), collapse = ", "), ".", call. = FALSE)
+  }
+  coefs
 }
 
 ## GUIDE-LEVEL VARIABILITY =========================================================================
