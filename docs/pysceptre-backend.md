@@ -634,7 +634,9 @@ one stage with an absolute bar rather than a relative one.
    6.2e-12 platform residual above. Theta as in §3.2. Three defects the gates caught rather than
    luck: counts stored as `uint16` made `np.log` return **float32** (2.5e-7 on the size factors);
    `grna_perts` was missing the non-targeting guides, which would have kept the control arm's mean
-   while losing its guide-level variance; and `pairs.tsv`'s column order.
+   while losing its guide-level variance; and `pairs.tsv`'s column order. (The second is moot since
+   2026-09-24: every guide outside the target now has an effect of exactly 1, so control cells
+   carry no guide-level spread at all. See `methods.md`.)
 3. ~~**Benchmark before committing to the shape.**~~ **Done, and it overturned §2.** The four
    terms, measured: the per-pair test is **85 %** of the work, the per-gene Poisson fits 14 %,
    drawing counts 5 %, and the per-target binomial fit and CRT draws **1.5 %** — of which the

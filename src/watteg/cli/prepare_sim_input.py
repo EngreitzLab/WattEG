@@ -187,16 +187,16 @@ def main(argv: list[str] | None = None) -> int:
             "guide its own effect size and cannot run without them; re-export with a pysceptre "
             "that writes the targeting_grna units."
         )
-    # NON-TARGETING GUIDES BELONG IN grna_perts, and leaving them out would be a
-    # silent change to the simulation rather than a tidy-up. R builds this
-    # matrix from @initial_grna_assignment_list, which covers every gRNA, and
-    # `create_guide_pert_status` then assigns each CONTROL cell whichever guide
-    # it carries -- which for a control cell is usually a non-targeting one.
-    # Those guides draw an effect size around 1 with the same guide-to-guide
-    # spread the targeting ones get. Drop them and every control cell falls to
-    # the no-effect row instead, so the control arm loses its guide-level
-    # variance while keeping its mean. Same centre, narrower spread, and
-    # nothing downstream would say so.
+    # NON-TARGETING GUIDES STAY IN grna_perts, so the matrix covers every gRNA
+    # the way R's does (it is built from @initial_grna_assignment_list), and a
+    # control cell's guide status points at the guide it actually carries. That
+    # keeps the status convention identical across the two implementations,
+    # which the shared-fixture tests check. It no longer changes a simulated
+    # number: since 2026-09-24 every guide outside the target has an effect of
+    # exactly 1 (see watteg.perturbation), so a control cell comes out at 1
+    # whether it points at a non-targeting guide or at the no-effect row. Until
+    # then those guides drew N(1, guide_sd), and dropping them would have
+    # removed that spread from the control cells.
     guide_cells = dict(in_use.targeting_grna_cells)
     guide_cells.update(in_use.ntc_grna_cells or {})
     grna_ids = sorted(guide_cells)

@@ -98,8 +98,12 @@ def simulate_target(
     is_perturbed = target_cells(sim.cre_perts, sim.target_ids, target)
     n_perturbed = int(is_perturbed.sum())
     if n_perturbed == 0:
-        # Skipped, as R skips it. Raising here used to kill the whole split, and
-        # with it every other target's pairs in that task.
+        # Skipped, as R skips it, so a direct CLI run keeps the other targets'
+        # rows instead of losing the whole split. In the pipeline this still
+        # fails the task: POWER_SIMULATION checks that every pair produced every
+        # replicate, and a skipped target's pairs produce none. That is the loud
+        # outcome wanted there -- a pair with QC-passing counts but no perturbed
+        # cell means the inputs disagree -- and the task log names the target.
         warnings.warn(f"skipping target {target!r}: it perturbs no cell", stacklevel=2)
         return None
 

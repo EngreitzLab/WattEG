@@ -59,6 +59,7 @@ process POWER_SIMULATION {
     actual=\$(gzip -cd ${out_name} | wc -l)
     if [ "\${actual}" -ne "\${expected}" ]; then
         echo "ERROR: wrote \${actual} lines, expected \${expected} (\${n_pairs} pairs x ${reps} replicates + header)." >&2
+        echo "A target that perturbs no cell is skipped and writes no rows; look for 'skipped' above." >&2
         exit 1
     fi
     """
