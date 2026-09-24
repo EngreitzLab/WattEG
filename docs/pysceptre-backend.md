@@ -751,6 +751,15 @@ spread match, and if it does not, the diagnosis was wrong rather than incomplete
 that a pass would confirm that diagnosis *and* the port at once, which is weaker than it sounds and
 worth saying out loud rather than reporting as a clean green.
 
+> **Resolved 2026-09-24: the 27 % was an estimand difference, not a Python bug.** Python pinned the
+> realised mean knockdown (a fixed element effect) from its first commit. The R code it was compared
+> against, like the original DC-TAP code, centred on the wrong columns, so its realised mean was free
+> to vary. On a real screen that is the same as not centring at all. Moving R's reorder before the
+> centring (`2b76284`) made R pin too, and so silently changed which quantity R simulated; no one
+> had chosen it. The owner has now chosen the fixed element effect for both languages, with control
+> cells at exactly 1 (see `methods.md`, "What simulated power means"). A Stage B re-run therefore
+> compares two implementations of the same estimand, and is expected to agree.
+
 **Three scientific questions are open and recorded, none of them acted on** (§3.2b, §3.2c, §5.2).
 The largest, simulating from `exp(X . beta)`, has been taken; the other two are judgement calls
 about which cells and which estimator belong, and both change every published number.

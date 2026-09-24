@@ -14,26 +14,70 @@ gene's mean in the perturbed cells. So `0.15` scales expression to 0.85× baseli
 This conversion is the reason the column suffixes read `power_at_effect_size_15` — the label is
 `effect_size × 100`.
 
+## What simulated power means
+
+**Power at a fixed element effect.** "Power at 15%" is the probability of detecting the pair when
+the element's guides produce **exactly** a 15% mean knockdown across the perturbed cells, in every
+simulated screen. The guides still differ from one another (next section); what is fixed is their
+cell-weighted mean, which is the quantity sceptre's union test measures. Power is a property of a
+test at a value of the parameter it targets, and this is that parameter.
+
+This was decided on 2026-09-24, and it is written down here because it was never written down
+before, which cost several regenerations:
+
+- The original code (Sceptre_Power_Simulations, 2024, and the DC-TAP paper pipeline) called a
+  centring step whose comment says it pins the mean. But it applied a cell-order mask to a matrix
+  whose columns were still in perturbed-then-control order. It shifted the wrong columns, and the
+  realised mean was left free to vary. On a real screen that is indistinguishable from not
+  centring at all, so the published DC-TAP power averages over the realised knockdown instead
+  ("random guide effects"). It got there by accident, not by design.
+- WattEG inherited the same order. On 2026-09-21 (`2b76284`) the reorder was moved before the
+  centring. That fixed a real indexing bug and, with it, silently changed which quantity was
+  simulated.
+- The alternative, random guide effects, is *expected* power averaged over a prior on the
+  knockdown. It is a different quantity, and as the draws are parameterised it does not even start
+  at α: at effect size 0 a target's guides still move expression, so a null element on a highly
+  expressed gene is "detected" around 20% of the time. If uncertainty about guide efficiency is
+  wanted, it belongs in a separately labelled output with a multiplicative efficiency model.
+
+Two consequences to accept knowingly. WattEG does not reproduce the published DC-TAP per-pair power,
+which is the other quantity. And `guide_sd` barely moves power at effect sizes up to 0.5, because
+the guides' spread around a pinned mean adds little variance to what the test sees.
+
 ## Guide-to-guide variability
 
-Guides targeting the same element are not equally effective, and treating them as identical would
-overstate power. Each gRNA therefore gets its own effect size, drawn as
+Guides targeting the same element are not equally effective. Each of the target's gRNAs therefore
+gets its own effect size, drawn independently for every gene:
 
 ```
-targeting guides:  N(1 - effect_size, guide_sd)
-control guides:    N(1,               guide_sd)
+this target's guides:  N(1 - effect_size, guide_sd)
+every other guide:     exactly 1
 ```
 
-with `guide_sd = 0.13` by default (previously hardcoded). Negative draws are clamped to 0 — a guide
-cannot produce negative expression.
+with `guide_sd = 0.13` by default. Negative draws are clamped to 0, because a guide cannot produce
+negative expression.
 
-Clamping biases the mean upward, so each gene's effect-size matrix is then **re-centred**: the
-perturbed block is shifted so its row mean equals the requested relative expression level, and the
-control block so its row mean equals 1. Without this step the realised effect size would be
-systematically weaker than requested.
+**Other guides have no effect on the tested genes.** Control cells carry guides that belong to
+other elements, or none at all, and those do not move this gene. The dispersion the counts are drawn
+with was fitted to real cells that already carry their real guides, so it already contains whatever
+those guides do. Every version until 2026-09-24 drew an extra `N(1, guide_sd)` for them, going back
+to the original DC-TAP code. That counted the noise twice: a gene with theta 146 came back from its
+own simulated null data with theta 42, and power was understated for highly expressed,
+low-dispersion genes.
 
-Cells carrying no guide get a no-effect row (multiplier 1). A cell carrying several guides has one
-picked at random, per replicate.
+**The perturbed cells' mean is then pinned** to the requested relative expression, gene by gene: the
+perturbed block is shifted so its row mean equals `1 - effect_size` exactly. This step is what makes
+the effect *fixed* (previous section). It is not a correction for clamping, which is what this page
+used to say: at effect size 0.15 a guide clamps with probability about 3 × 10⁻¹¹. At strong
+knockdowns (effect size ≥ 0.7) the shift can push some guides below zero. They are clamped and the
+shift is repeated until the mean is exact; if it cannot be reached, the run stops instead of
+returning an effect that misses the target.
+
+A cell carrying no guide gets multiplier 1. A cell carrying several of the target's guides has one
+picked at random **once per target**, and it keeps that guide in every replicate: which guide a cell
+carries is a fact about the screen, not about a draw. (This page used to say "per replicate", which
+no implementation ever did.) Only 0.18% of perturbed cells carry more than one of their target's
+guides on moi5, so the choice barely matters.
 
 ## Simulating counts
 
@@ -55,6 +99,15 @@ median, and `exp(X·β)` to 9.2e-10 across 134.5 million gene × cell values.
 screen's test would have detected an effect, so the counts it is shown should be counts from the
 model that test assumes. Taking both the level and the noise from one fit is what makes that true
 by construction rather than by coincidence.
+
+**Each cell keeps its own covariates**, and so its own library size. The original code (DC-TAP,
+from 2025-04-11) shuffled the size factors across cells in every replicate, on the reasoning that
+simulated library sizes should be a draw from the observed distribution. That is incorrect here:
+the effect size is indexed by cell, so shuffling pairs one cell's perturbation status with another
+cell's library size, and the covariates the test adjusts for with yet another cell's. Before
+2025-04-11 it applied no size factors at all. WattEG removed the shuffle in `14c28b6`. The fitted
+baseline cannot reintroduce it: each cell's expected count is computed from that cell's own
+covariate row.
 
 ### What this replaced, and why
 
@@ -109,6 +162,10 @@ p_value < threshold   AND   log_2_fold_change < 0
 discovery analysis**, read from `@discovery_result`. Using the empirical threshold rather than a bare
 `alpha` matters: it encodes the correction actually applied to your data, at your number of tests.
 `--alpha` exists only for objects that have no discovery results.
+
+At effect size 0 (the null arm) the same rule measures the rate of false calls **in the knockdown
+direction**. That is α for a left-sided test, but only about α/2 for a two-sided one, because half
+of the two-sided false calls have a positive fold change.
 
 ## Why control-cell sampling is not used
 
