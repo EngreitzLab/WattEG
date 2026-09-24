@@ -141,6 +141,13 @@ validate_sim_input <- function(x) {
 #'
 #' The perturbation matrices are per-gRNA and per-target, so they are untouched.
 subset_genes <- function(x, genes) {
+  # A duplicated gene would be simulated twice as two "different" genes with the same parameters,
+  # and every per-gene lookup after it would still line up by position -- so it errors instead.
+  if (anyDuplicated(genes)) {
+    stop("subset_genes() was given duplicate gene ids, including ",
+         paste(utils::head(unique(genes[duplicated(genes)]), 3), collapse = ", "), ".",
+         call. = FALSE)
+  }
   unknown <- setdiff(genes, x$genes)
   if (length(unknown) > 0) {
     stop(length(unknown), " gene(s) not present in sim_input, including ",
