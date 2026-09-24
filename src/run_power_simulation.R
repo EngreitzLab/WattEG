@@ -62,7 +62,9 @@ option_list <- list(
   make_option("--effect-size", type = "double", default = NULL, dest = "effect_size",
               help = paste("Effect size as a *fractional decrease* in expression, e.g. 0.15 for",
                            "a 15%% knockdown. Converted internally to a relative expression",
-                           "level of 1 - effect_size.")),
+                           "level of 1 - effect_size. Power is reported at a FIXED element",
+                           "effect: in every replicate the realised mean knockdown across the",
+                           "perturbed cells equals this value exactly (see docs/methods.md).")),
   make_option("--reps", type = "integer", default = NULL, dest = "reps",
               help = "Number of simulation reps to run in this chunk."),
   make_option("--rep-offset", type = "integer", default = 0L, dest = "rep_offset",
@@ -81,8 +83,11 @@ option_list <- list(
                            "See baseline_expression() in lib/simulate.R.")),
   make_option("--guide-sd", type = "double", default = 0.13, dest = "guide_sd",
               help = paste("Standard deviation of the per-gRNA effect size around the target",
-                           "effect size, i.e. guide-to-guide variability [default %default].",
-                           "Was hardcoded at 0.13 in the original.")),
+                           "effect size, i.e. guide-to-guide variability among the target's own",
+                           "guides [default %default]. The guides differ from each other within",
+                           "a replicate, but their mean is pinned to --effect-size, so this does",
+                           "not add uncertainty about the element's effect. Other guides have",
+                           "no effect on the tested genes. Was hardcoded at 0.13 in the original.")),
   make_option("--n-control-cells", type = "integer", default = NULL, dest = "n_control_cells",
               help = paste("Sample this many control cells per target instead of using every",
                            "non-perturbed cell. Unset means use all of them, which is the",
@@ -375,31 +380,23 @@ for (target in targets) {
     # See derive_seed() in lib/cli.R.
     set.seed(derive_seed(opts$seed, target, rep_id, opts$effect_size))
 
-    es_mat <- create_effect_size_matrix(grna_pert_status, pert_guides = pert_guides,
-                                        gene_effect_sizes = effect_sizes, guide_sd = opts$guide_sd)
-    # REORDER BEFORE CENTRING, not after. create_effect_size_matrix() returns columns in
-    # perturbed-then-control order -- the order create_guide_pert_status() built the status vector
-    # in -- while `pert_status` is in cell order. Centring first therefore applied
-    # `pert_status == 1` to a matrix whose columns were not cells in that order: it selected the
-    # right NUMBER of columns, so it ran silently, and centred the wrong ones.
-    #
-    # The consequence was not a small one. Centring exists to make the realised effect size equal
-    # the requested one on every replicate; applied to the wrong columns it does not, and the
-    # realised knockdown varies from replicate to replicate by the per-guide draw. Measured over
-    # 300 draws at guide_sd = 0.13 with 12 guides: mean 0.845 and sd 0.036 against a target of
-    # 0.85 and a required sd of 0. That extra variance inflates the replicate-to-replicate spread
-    # of the fold change by about 38%, which pulls every pair's power toward 0.5 -- understating
-    # it for well-powered pairs and overstating it for weak ones.
-    es_mat <- es_mat[, restore_cell_order, drop = FALSE]
-    es_mat <- center_effect_size_matrix(es_mat, pert_status = pert_status,
-                                       gene_effect_sizes = effect_sizes)
+    # One replicate's effect sizes, in cell order, with each gene's realised mean over the perturbed
+    # cells pinned to the requested effect: power at a FIXED element effect (estimand A, decided
+    # 2026-09-24 -- see docs/methods.md). simulate_effect_sizes() is the one place the
+    # create -> reorder -> centre order lives. Getting that order wrong is what made every version
+    # from the original DC-TAP code until 2026-09-21 compute something else: centring before the
+    # reorder shifted the wrong columns and left the realised mean free to vary.
+    es_mat <- simulate_effect_sizes(grna_pert_status, pert_status, restore_cell_order,
+                                    pert_guides = pert_guides, gene_effect_sizes = effect_sizes,
+                                    guide_sd = opts$guide_sd)
 
     counts <- draw_counts(gene_object, es_mat, baseline)
 
     sceptre_use <- target_template
     sceptre_use@response_matrix <- list(as_sceptre_response_matrix(counts, report_density = FALSE))
 
-    # This simulation's null models, fitted on a null simulation of the same replicate. Passing the
+    # This replicate's null models: fitted by fit_null_models.R on an INDEPENDENT null simulation
+    # (its own seed), paired with this replicate by rep id only -- they share no draws. Passing the
     # full set rather than this target's genes is deliberate: sceptre looks entries up by
     # response_id, so the extra ones are inert, and subsetting would cost a match() per rep for no
     # benefit. Left empty, sceptre refits each gene here instead.

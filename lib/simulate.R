@@ -4,12 +4,17 @@
 ## Ported from R/power_simulations_fun.R. fit_negbinom_deseq2() is not carried over: nothing
 ## called it, and it was the only reason the pipeline depended on DESeq2.
 ##
-## The numerical behaviour follows the original with one deliberate exception: the original drew
-## a random permutation of the size factors before simulating, decoupling each cell's library
-## size from its identity. That shuffle is wrong -- the size factor belongs to the cell whose
-## counts are being simulated -- so it has been removed and each cell now keeps its own size
-## factor. This also removes a sample() call from the RNG stream, so a given seed no longer
-## reproduces the pre-refactor output draw for draw.
+## It departs from the original deliberately, and docs/methods.md ("What simulated power means")
+## is the specification. In short:
+##   - each cell keeps its own size factor and covariates: the original shuffled size factors
+##     across cells, pairing one cell's perturbation status with another's library size;
+##   - the expected counts are sceptre's own fitted model, exp(X . beta), not mean * size factor;
+##   - the realised mean effect over the perturbed cells is pinned to the requested one in every
+##     replicate (power at a fixed element effect). The original meant to, but centred before
+##     reordering and so shifted the wrong columns;
+##   - guides that belong to anything else have an effect of exactly 1; the original gave them
+##     N(1, guide_sd), which double-counted noise already in the fitted dispersion.
+## Each of these changes the RNG stream, so no seed reproduces the original draw for draw.
 
 suppressPackageStartupMessages(library(Matrix))
 
@@ -68,6 +73,15 @@ baseline_expression <- function(x, covariate_matrix = NULL,
   if (ncol(covariate_matrix) != ncol(x$fitted_coefs)) {
     stop("covariate_matrix has ", ncol(covariate_matrix), " columns but fitted_coefs has ",
          ncol(x$fitted_coefs), "; they come from different designs.", call. = FALSE)
+  }
+  # The product below pairs coefficients with covariates by POSITION, so a matching count is not
+  # enough: the same covariates in a different order would give every cell a plausible, wrong
+  # expected count. Both carry the design's column names (e.g. "log(response_n_umis)").
+  if (!identical(colnames(covariate_matrix), colnames(x$fitted_coefs))) {
+    stop("covariate_matrix and fitted_coefs name their columns differently (",
+         paste(utils::head(colnames(covariate_matrix), 3), collapse = ", "), " vs ",
+         paste(utils::head(colnames(x$fitted_coefs), 3), collapse = ", "),
+         "); the product would pair the wrong coefficient with each covariate.", call. = FALSE)
   }
   # tcrossprod(A, B) is A %*% t(B): (genes x p) against (cells x p) gives genes x cells.
   exp(tcrossprod(x$fitted_coefs, covariate_matrix))
@@ -260,66 +274,153 @@ cell_order <- function(pert_status) {
 
 #' Per-cell gRNA perturbation status: which guide (if any) each cell carries.
 #'
-#' Control-cell statuses are offset past the targeting guides so that every guide, targeting or
-#' not, has a distinct index into the effect-size table.
+#' 0 is no guide, 1..length(pert_guides) is one of this target's guides (by its position in
+#' `pert_guides`), and anything above that is a guide belonging to something else. Control-cell
+#' statuses are offset by `length(pert_guides)`, the number of target guides -- not by the highest
+#' index any perturbed cell happened to carry. Offsetting by that maximum, as this did until
+#' 2026-09-24, put a control guide on a *targeting* row of the effect table whenever the
+#' last-listed target guide was carried by no perturbed cell.
+#'
+#' The subsets keep their dimensions (`drop = FALSE`) and are always converted. A subset that
+#' collapsed to a vector -- one perturbed cell carrying several target guides, say -- used to skip
+#' the conversion and return a status vector of the wrong length, which the positional reorder
+#' downstream then misread without an error.
 #'
 #' IMPORTANT: the result is ordered perturbed-cells-first-then-control-cells (each block in
-#' ascending cell position), which is *not* the order of x$cells. Use cell_order() to get the
-#' permutation and reorder the effect-size matrix back. The original relied on cell barcodes as
-#' names for this; positions are cheaper and cannot silently mismatch.
+#' ascending cell position), which is *not* the order of x$cells. Do not reorder it by hand: go
+#' through simulate_effect_sizes(), which applies the permutation in the one order that is
+#' correct. The original relied on cell barcodes as names for this; positions are cheaper and
+#' cannot silently mismatch.
 create_guide_pert_status <- function(pert_status, grna_perts, pert_guides) {
-  grnas_pert_cells <- grna_perts[pert_guides, pert_status == 1]
-  if (!is.null(nrow(grnas_pert_cells))) {
-    grnas_pert_cells <- convert_pert_mat_to_vector(grnas_pert_cells)
-  }
-
-  grnas_ctrl_cells <- grna_perts[!rownames(grna_perts) %in% pert_guides, pert_status == 0]
-  if (!is.null(nrow(grnas_ctrl_cells))) {
-    grnas_ctrl_cells <- convert_pert_mat_to_vector(grnas_ctrl_cells)
-  }
+  grnas_pert_cells <- convert_pert_mat_to_vector(
+    grna_perts[pert_guides, pert_status == 1, drop = FALSE]
+  )
+  grnas_ctrl_cells <- convert_pert_mat_to_vector(
+    grna_perts[!rownames(grna_perts) %in% pert_guides, pert_status == 0, drop = FALSE]
+  )
 
   ctrl_perts <- grnas_ctrl_cells > 0
-  grnas_ctrl_cells[ctrl_perts] <- grnas_ctrl_cells[ctrl_perts] + max(grnas_pert_cells)
+  grnas_ctrl_cells[ctrl_perts] <- grnas_ctrl_cells[ctrl_perts] + length(pert_guides)
 
-  c(grnas_pert_cells, grnas_ctrl_cells)
+  status <- c(grnas_pert_cells, grnas_ctrl_cells)
+  if (length(status) != length(pert_status)) {
+    stop("create_guide_pert_status() built ", length(status), " statuses for ",
+         length(pert_status), " cells.", call. = FALSE)
+  }
+  status
 }
 
-#' Effect-size matrix with guide-to-guide variability.
+#' Effect-size matrix with guide-to-guide variability among the target's guides.
 #'
-#' Each guide gets its own effect size drawn around the target effect size (targeting guides) or
-#' around 1 (control guides), with standard deviation guide_sd. Negative draws are clamped to 0.
+#' Each of the target's guides draws its own effect size around the requested relative expression,
+#' with standard deviation guide_sd, independently for every gene; negative draws clamp to 0.
+#'
+#' Every other guide has an effect of exactly 1. Those guides belong to other elements, or are
+#' non-targeting, and have no business moving this gene. The dispersion the counts are drawn with
+#' was fitted to real cells that already carry their real guides, so it already contains whatever
+#' those guides do. Drawing an extra N(1, guide_sd) multiplier for them -- as every version did
+#' until 2026-09-24, going back to the original DC-TAP code -- counted that noise twice: a gene
+#' with theta 146 came back from its own simulated null data with theta 42, and power was
+#' understated for highly expressed, low-dispersion genes.
 create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect_sizes, guide_sd) {
   n_pert_guides <- length(pert_guides)
-  n_ctrl_guides <- max(grna_pert_status) - n_pert_guides
+  n_ctrl_guides <- max(0L, max(grna_pert_status) - n_pert_guides)
+  n_genes <- length(gene_effect_sizes)
 
-  guide_effect_sizes_pert <- vapply(gene_effect_sizes, FUN = rnorm, n = n_pert_guides,
-                                    sd = guide_sd, FUN.VALUE = numeric(n_pert_guides))
-  guide_effect_sizes_ctrl <- vapply(rep(1, length(gene_effect_sizes)), FUN = rnorm,
-                                    n = n_ctrl_guides, sd = guide_sd,
-                                    FUN.VALUE = numeric(n_ctrl_guides))
-  guide_effect_sizes <- rbind(guide_effect_sizes_pert, guide_effect_sizes_ctrl)
-  guide_effect_sizes[guide_effect_sizes < 0] <- 0
+  # matrix() because vapply() returns a plain vector when there is a single guide.
+  guide_effect_sizes_pert <- matrix(
+    vapply(gene_effect_sizes, FUN = rnorm, n = n_pert_guides, sd = guide_sd,
+           FUN.VALUE = numeric(n_pert_guides)),
+    nrow = n_pert_guides, ncol = n_genes
+  )
+  guide_effect_sizes_pert[guide_effect_sizes_pert < 0] <- 0
+  guide_effect_sizes_ctrl <- matrix(1, nrow = n_ctrl_guides, ncol = n_genes)
 
   # Row 1 is the no-effect row, used by cells carrying no guide.
-  guide_effect_sizes <- rbind(1, guide_effect_sizes)
+  guide_effect_sizes <- rbind(1, guide_effect_sizes_pert, guide_effect_sizes_ctrl)
 
-  t(guide_effect_sizes[grna_pert_status + 1, ])
+  t(guide_effect_sizes[grna_pert_status + 1, , drop = FALSE])
 }
 
-#' Shift the effect-size matrix so each gene's mean effect equals the requested effect size.
+#' Pin each gene's realised mean effect over the perturbed cells to the requested effect size.
 #'
-#' Drawing per-guide effect sizes and clamping negatives to 0 biases the mean upwards, so the
-#' perturbed and control blocks are each re-centred: perturbed on gene_effect_sizes, control on 1.
-center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_sizes) {
+#' This is what makes the simulated power the power at a FIXED element effect (estimand A, decided
+#' 2026-09-24; see docs/methods.md): in every replicate, the cell-weighted mean effect across the
+#' perturbed cells equals the requested one. The guides still differ from each other within a
+#' replicate; only the replicate-to-replicate wobble of their mean is removed. It is not a
+#' correction for clamping, which is what this docstring used to claim: at es 0.15 a guide clamps
+#' with probability ~3e-11.
+#'
+#' For each gene the result is pmax(v + c, 0), where v are the perturbed cells' (already clamped)
+#' effects and c is the one constant that puts the mean exactly on the target. Where nothing would
+#' clamp -- every realistic case up to es 0.5 -- that is a plain shift, c = target - mean(v). At
+#' strong knockdowns a shift down pushes some cells below zero, so c is solved exactly rather than
+#' approached: see pin_to_mean(). An earlier version shifted, clamped and repeated; that converges
+#' only linearly once most cells clamp, and at es >= ~0.99 ran out of iterations and stopped a task
+#' on a pin that exists.
+#'
+#' Control cells must already be exactly 1 (create_effect_size_matrix() guarantees it), so there is
+#' nothing to centre for them; this checks it rather than assuming it.
+center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_sizes,
+                                      tol = 1e-12) {
+  if (length(pert_status) != ncol(effect_size_mat)) {
+    stop("pert_status has ", length(pert_status), " entries but the effect-size matrix has ",
+         ncol(effect_size_mat), " cells.", call. = FALSE)
+  }
   is_pert <- pert_status == 1
-  is_ctrl <- pert_status == 0
 
-  mean_es_pert <- rowMeans(effect_size_mat[, is_pert, drop = FALSE])
-  mean_es_ctrl <- rowMeans(effect_size_mat[, is_ctrl, drop = FALSE])
+  if (any(effect_size_mat[, !is_pert] != 1)) {
+    stop("Control cells must carry an effect of exactly 1; found other values. ",
+         "See create_effect_size_matrix().", call. = FALSE)
+  }
 
-  effect_size_mat[, is_pert] <- effect_size_mat[, is_pert] + (gene_effect_sizes - mean_es_pert)
-  effect_size_mat[, is_ctrl] <- effect_size_mat[, is_ctrl] + (1 - mean_es_ctrl)
-
-  effect_size_mat[effect_size_mat < 0] <- 0
+  if (any(is_pert)) {
+    pert <- effect_size_mat[, is_pert, drop = FALSE]
+    for (g in seq_len(nrow(pert))) {
+      pert[g, ] <- pin_to_mean(pert[g, ], gene_effect_sizes[[g]])
+    }
+    gap <- gene_effect_sizes - rowMeans(pert)
+    if (any(!is.finite(gap)) || any(abs(gap) >= tol)) {
+      stop("Could not pin the realised mean effect to the requested one (largest miss ",
+           signif(max(abs(gap)), 3), ").", call. = FALSE)
+    }
+    effect_size_mat[, is_pert] <- pert
+  }
   effect_size_mat
+}
+
+#' The values pmax(v + c, 0) whose mean is exactly `target`, for the one constant c that does it.
+#'
+#' f(c) = mean(pmax(v + c, 0)) is continuous, non-decreasing and piecewise linear, with a kink where
+#' each value hits zero; for any target > 0 it has a root. Sorting v in decreasing order, if exactly
+#' the top j values stay positive then f(c) = (sum of those j + j * c) / n, so c = (n * target -
+#' sum) / j. The right j is the largest one whose kink, f(-s_j), is still at or below the target.
+#' One sort, no iteration, exact to rounding.
+pin_to_mean <- function(v, target) {
+  n <- length(v)
+  s <- sort(v, decreasing = TRUE)
+  cs <- cumsum(s)
+  f_at_kink <- (cs - seq_len(n) * s) / n    # f(-s_j): the mean when the j-th largest just hits 0
+  j <- max(which(f_at_kink <= target))      # f(-s_1) = 0, so j >= 1 whenever target >= 0
+  pmax(v + (n * target - cs[j]) / j, 0)
+}
+
+#' One replicate's effect-size matrix, in cell order, pinned to the requested effect.
+#'
+#' The only path from a guide status to the matrix draw_counts() consumes. It exists so that the
+#' simulation and its tests run the SAME sequence: the order of these steps is exactly what was
+#' wrong from the original DC-TAP code until 2026-09-21 (centring before the reorder shifted the
+#' wrong columns), and a test that re-implements the order by hand cannot catch a regression in it.
+#'
+#' @param grna_pert_status from create_guide_pert_status(), perturbed-then-control order
+#' @param pert_status 1/0 per cell, in cell order
+#' @param restore_cell_order order(cell_order(pert_status)), computed once per target
+#' @return genes x cells, in cell order
+simulate_effect_sizes <- function(grna_pert_status, pert_status, restore_cell_order,
+                                  pert_guides, gene_effect_sizes, guide_sd) {
+  es_mat <- create_effect_size_matrix(grna_pert_status, pert_guides = pert_guides,
+                                      gene_effect_sizes = gene_effect_sizes, guide_sd = guide_sd)
+  es_mat <- es_mat[, restore_cell_order, drop = FALSE]
+  center_effect_size_matrix(es_mat, pert_status = pert_status,
+                            gene_effect_sizes = gene_effect_sizes)
 }
