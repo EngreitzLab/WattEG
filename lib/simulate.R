@@ -4,12 +4,17 @@
 ## Ported from R/power_simulations_fun.R. fit_negbinom_deseq2() is not carried over: nothing
 ## called it, and it was the only reason the pipeline depended on DESeq2.
 ##
-## The numerical behaviour follows the original with one deliberate exception: the original drew
-## a random permutation of the size factors before simulating, decoupling each cell's library
-## size from its identity. That shuffle is wrong -- the size factor belongs to the cell whose
-## counts are being simulated -- so it has been removed and each cell now keeps its own size
-## factor. This also removes a sample() call from the RNG stream, so a given seed no longer
-## reproduces the pre-refactor output draw for draw.
+## It departs from the original deliberately, and docs/methods.md ("What simulated power means")
+## is the specification. In short:
+##   - each cell keeps its own size factor and covariates: the original shuffled size factors
+##     across cells, pairing one cell's perturbation status with another's library size;
+##   - the expected counts are sceptre's own fitted model, exp(X . beta), not mean * size factor;
+##   - the realised mean effect over the perturbed cells is pinned to the requested one in every
+##     replicate (power at a fixed element effect). The original meant to, but centred before
+##     reordering and so shifted the wrong columns;
+##   - guides that belong to anything else have an effect of exactly 1; the original gave them
+##     N(1, guide_sd), which double-counted noise already in the fitted dispersion.
+## Each of these changes the RNG stream, so no seed reproduces the original draw for draw.
 
 suppressPackageStartupMessages(library(Matrix))
 
@@ -341,21 +346,23 @@ create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect
 #'
 #' This is what makes the simulated power the power at a FIXED element effect (estimand A, decided
 #' 2026-09-24; see docs/methods.md): in every replicate, the cell-weighted mean effect across the
-#' perturbed cells -- the quantity sceptre's union test measures -- equals the requested one. The
-#' guides still differ from each other within a replicate; only the replicate-to-replicate wobble
-#' of their mean is removed. It is not a correction for clamping, which is what this docstring
-#' used to claim: at es 0.15 a guide clamps with probability ~3e-11.
+#' perturbed cells equals the requested one. The guides still differ from each other within a
+#' replicate; only the replicate-to-replicate wobble of their mean is removed. It is not a
+#' correction for clamping, which is what this docstring used to claim: at es 0.15 a guide clamps
+#' with probability ~3e-11.
 #'
-#' Shift, clamp at 0, repeat. A single shift is exact whenever nothing clamps, which is every
-#' realistic case up to es 0.5. At strong knockdowns (es >= 0.7) the shift pushes some guides below
-#' zero, clamping them lifts the mean back above the target, and the next shift corrects that; it
-#' converges to max(draw + c, 0) with the constant c that hits the target exactly. If it cannot get
-#' there, it stops rather than return a matrix that silently misses the target.
+#' For each gene the result is pmax(v + c, 0), where v are the perturbed cells' (already clamped)
+#' effects and c is the one constant that puts the mean exactly on the target. Where nothing would
+#' clamp -- every realistic case up to es 0.5 -- that is a plain shift, c = target - mean(v). At
+#' strong knockdowns a shift down pushes some cells below zero, so c is solved exactly rather than
+#' approached: see pin_to_mean(). An earlier version shifted, clamped and repeated; that converges
+#' only linearly once most cells clamp, and at es >= ~0.99 ran out of iterations and stopped a task
+#' on a pin that exists.
 #'
 #' Control cells must already be exactly 1 (create_effect_size_matrix() guarantees it), so there is
 #' nothing to centre for them; this checks it rather than assuming it.
 center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_sizes,
-                                      tol = 1e-12, max_iter = 200L) {
+                                      tol = 1e-12) {
   if (length(pert_status) != ncol(effect_size_mat)) {
     stop("pert_status has ", length(pert_status), " entries but the effect-size matrix has ",
          ncol(effect_size_mat), " cells.", call. = FALSE)
@@ -367,22 +374,35 @@ center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_
          "See create_effect_size_matrix().", call. = FALSE)
   }
 
-  pert <- effect_size_mat[, is_pert, drop = FALSE]
-  for (i in seq_len(max_iter)) {
+  if (any(is_pert)) {
+    pert <- effect_size_mat[, is_pert, drop = FALSE]
+    for (g in seq_len(nrow(pert))) {
+      pert[g, ] <- pin_to_mean(pert[g, ], gene_effect_sizes[[g]])
+    }
     gap <- gene_effect_sizes - rowMeans(pert)
-    if (all(abs(gap) < tol)) break
-    pert <- pert + gap
-    pert[pert < 0] <- 0
+    if (any(!is.finite(gap)) || any(abs(gap) >= tol)) {
+      stop("Could not pin the realised mean effect to the requested one (largest miss ",
+           signif(max(abs(gap)), 3), ").", call. = FALSE)
+    }
+    effect_size_mat[, is_pert] <- pert
   }
-  gap <- gene_effect_sizes - rowMeans(pert)
-  if (any(abs(gap) >= tol)) {
-    stop("Could not pin the realised mean effect to the requested one (largest miss ",
-         signif(max(abs(gap)), 3), " after ", max_iter, " iterations): too many guide effects ",
-         "clamp at zero for this effect size and guide_sd.", call. = FALSE)
-  }
-
-  effect_size_mat[, is_pert] <- pert
   effect_size_mat
+}
+
+#' The values pmax(v + c, 0) whose mean is exactly `target`, for the one constant c that does it.
+#'
+#' f(c) = mean(pmax(v + c, 0)) is continuous, non-decreasing and piecewise linear, with a kink where
+#' each value hits zero; for any target > 0 it has a root. Sorting v in decreasing order, if exactly
+#' the top j values stay positive then f(c) = (sum of those j + j * c) / n, so c = (n * target -
+#' sum) / j. The right j is the largest one whose kink, f(-s_j), is still at or below the target.
+#' One sort, no iteration, exact to rounding.
+pin_to_mean <- function(v, target) {
+  n <- length(v)
+  s <- sort(v, decreasing = TRUE)
+  cs <- cumsum(s)
+  f_at_kink <- (cs - seq_len(n) * s) / n    # f(-s_j): the mean when the j-th largest just hits 0
+  j <- max(which(f_at_kink <= target))      # f(-s_1) = 0, so j >= 1 whenever target >= 0
+  pmax(v + (n * target - cs[j]) / j, 0)
 }
 
 #' One replicate's effect-size matrix, in cell order, pinned to the requested effect.

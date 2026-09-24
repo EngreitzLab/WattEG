@@ -347,12 +347,15 @@ test_that("a lone perturbed cell carrying several target guides still gets one s
   expect_equal(in_cell_order[c(4, 6)], c(0, 0))
 })
 
-test_that("strong knockdowns are pinned too, and a pin that cannot be reached is an error", {
+test_that("strong knockdowns are pinned exactly, including where most cells clamp", {
+  # es 0.99 and 0.999 are where the old shift-clamp-repeat loop ran out of iterations and stopped a
+  # task on a pin that exists: with only one guide left above zero it converged by a factor 0.9 per
+  # pass. pin_to_mean() solves for the shift instead.
   fx <- fixture_target()
   is_pert <- fx$pert_status == 1
-  for (es in c(0.7, 0.9)) {
+  for (es in c(0.7, 0.9, 0.99, 0.999)) {
     set.seed(11)
-    realised <- replicate(30, {
+    realised <- replicate(200, {
       m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
                                  c(g1 = 1 - es, g2 = 1 - es), guide_sd = 0.13)
       expect_true(all(m >= 0))
@@ -360,14 +363,52 @@ test_that("strong knockdowns are pinned too, and a pin that cannot be reached is
     })
     expect_equal(unname(c(realised)), rep(1 - es, length(realised)), tolerance = 1e-12)
   }
+})
 
-  # One shift of -0.2 sends two cells below zero; clamping them leaves the mean at 0.233, not 0.1.
-  # Allowed a single pass it must say so rather than return a matrix that misses the target.
-  mat <- matrix(c(0, 0, 0.9, 1, 1), nrow = 1)
-  expect_error(center_effect_size_matrix(mat, c(1, 1, 1, 0, 0), 0.1, max_iter = 1L),
+test_that("pin_to_mean finds the one shift that hits the target, as a root-finder would", {
+  # Perturbed cells at 0, 0 and 0.9 with a target of 0.1: a plain shift of -0.2 would send two cells
+  # below zero, and clamping them would leave the mean at 0.233. The exact answer shifts by -0.6.
+  expect_equal(pin_to_mean(c(0, 0, 0.9), 0.1), c(0, 0, 0.3), tolerance = 1e-15)
+
+  # Against uniroot on f(c) = mean(pmax(v + c, 0)) - target, on draws with heavy clamping and ties.
+  set.seed(21)
+  for (i in 1:50) {
+    v <- pmax(rep(rnorm(6, 0.1, 0.3), times = sample(1:40, 6)), 0)
+    target <- runif(1, 0.001, 0.5)
+    c_root <- uniroot(function(c) mean(pmax(v + c, 0)) - target, c(-2, 2), tol = 1e-14)$root
+    expect_equal(pin_to_mean(v, target), pmax(v + c_root, 0), tolerance = 1e-9)
+    expect_equal(mean(pin_to_mean(v, target)), target, tolerance = 1e-12)
+  }
+
+  # No clamping needed: the plain shift, to rounding, which is every case up to es 0.5.
+  v <- c(0.8, 0.9, 1.0)
+  expect_equal(pin_to_mean(v, 0.85), v + (0.85 - mean(v)), tolerance = 1e-15)
+
+  # A non-finite effect is a loud error, not a silently missed pin.
+  expect_error(center_effect_size_matrix(matrix(c(NaN, 0.5, 1), nrow = 1), c(1, 1, 0), 0.8),
                "Could not pin")
-  expect_equal(mean(center_effect_size_matrix(mat, c(1, 1, 1, 0, 0), 0.1)[1, 1:3]), 0.1,
-               tolerance = 1e-12)
+})
+
+test_that("at effect size 0 the perturbed mean is exactly 1 and the guides still differ", {
+  fx <- fixture_target()
+  is_pert <- fx$pert_status == 1
+  set.seed(22)
+  m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                             c(g1 = 1, g2 = 1), guide_sd = 0.13)
+  expect_equal(unname(rowMeans(m[, is_pert, drop = FALSE])), c(1, 1), tolerance = 1e-12)
+  expect_true(all(m[, !is_pert] == 1))
+  expect_gt(sd(m[1, is_pert]), 0.05)
+})
+
+test_that("each gene draws its own guide effects", {
+  # One draw shared across genes would make every tested gene of a target move together.
+  fx <- fixture_target()
+  is_pert <- fx$pert_status == 1
+  set.seed(23)
+  m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                             c(g1 = 0.85, g2 = 0.85, g3 = 0.85), guide_sd = 0.13)
+  expect_false(isTRUE(all.equal(m[1, is_pert], m[2, is_pert])))
+  expect_false(isTRUE(all.equal(m[2, is_pert], m[3, is_pert])))
 })
 
 test_that("baseline_expression refuses covariates in a different order than the coefficients", {

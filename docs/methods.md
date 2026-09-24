@@ -19,8 +19,12 @@ This conversion is the reason the column suffixes read `power_at_effect_size_15`
 **Power at a fixed element effect.** "Power at 15%" is the probability of detecting the pair when
 the element's guides produce **exactly** a 15% mean knockdown across the perturbed cells, in every
 simulated screen. The guides still differ from one another (next section); what is fixed is their
-cell-weighted mean, which is the quantity sceptre's union test measures. Power is a property of a
-test at a value of the parameter it targets, and this is that parameter.
+cell-weighted mean. That is the effect sceptre's union test targets, since it pools every cell
+carrying any of the element's guides; power is a property of a test at a value of the parameter it
+targets. The match is close rather than exact: the test compares expected counts, which weight
+each cell by its own baseline, and the guides' spread around the pinned mean adds a little variance
+of its own. At effect size 0 that spread nudges the false-call rate slightly above nominal for
+highly expressed genes.
 
 This was decided on 2026-09-24, and it is written down here because it was never written down
 before, which cost several regenerations:
@@ -69,14 +73,16 @@ low-dispersion genes.
 perturbed block is shifted so its row mean equals `1 - effect_size` exactly. This step is what makes
 the effect *fixed* (previous section). It is not a correction for clamping, which is what this page
 used to say: at effect size 0.15 a guide clamps with probability about 3 × 10⁻¹¹. At strong
-knockdowns (effect size ≥ 0.7) the shift can push some guides below zero. They are clamped and the
-shift is repeated until the mean is exact; if it cannot be reached, the run stops instead of
-returning an effect that misses the target.
+knockdowns (effect size ≥ 0.7) a plain shift would push some guides below zero, so the shift is
+solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c` that puts the
+mean on the target, which always exists for an effect size below 1. (An earlier version shifted,
+clamped and repeated; once most cells clamp that converges slowly, and at effect size ≥ 0.99 it ran
+out of iterations and stopped the run on a pin that exists.)
 
 A cell carrying no guide gets multiplier 1. A cell carrying several of the target's guides has one
-picked at random **once per target**, and it keeps that guide in every replicate: which guide a cell
-carries is a fact about the screen, not about a draw. (This page used to say "per replicate", which
-no implementation ever did.) Only 0.18% of perturbed cells carry more than one of their target's
+picked at random **once per target and effect size**, and it keeps that guide in every replicate.
+(This page used to say "per replicate", which no implementation ever did. The pick is seeded by the
+effect size as well as the target, so it can differ between effect sizes.) Only 0.18% of perturbed cells carry more than one of their target's
 guides on moi5, so the choice barely matters.
 
 ## Simulating counts
