@@ -57,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
         "--effect-size",
         type=float,
         required=True,
-        help="a fractional decrease: 0.15 is a 15%% knockdown. 0 is the null arm",
+        help="a fractional decrease: 0.15 is a 15%% knockdown. 0 is the null arm. Power is "
+        "reported at a FIXED element effect: in every replicate the realised mean knockdown "
+        "across the perturbed cells equals this value exactly (see docs/methods.md)",
     )
     parser.add_argument("--reps", type=int, required=True)
     parser.add_argument(
@@ -77,7 +79,9 @@ def main(argv: list[str] | None = None) -> int:
         "--guide-sd",
         type=float,
         default=DEFAULT_GUIDE_SD,
-        help="across-gRNA spread of the effect size [default %(default)s]",
+        help="spread of the effect size among the target's own guides [default %(default)s]. "
+        "The guides differ within a replicate, but their mean is pinned to --effect-size, so "
+        "this adds no uncertainty about the element's effect. Other guides have no effect",
     )
     parser.add_argument(
         "--n-jobs", type=int, default=8, help="workers for the per-gene tests [default %(default)s]"
@@ -93,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     # Zero is allowed on purpose: it is the null arm, and running it is the only
-    # way to measure this pipeline's type-I error from its own output.
+    # way to measure this pipeline's false-call rate from its own output. Note what
+    # it measures: a call needs p < threshold AND a negative fold change, so with a
+    # two-sided p-value it estimates about alpha/2, not alpha.
     if not 0.0 <= args.effect_size < 1.0:
         raise SystemExit(
             f"--effect-size must be a fractional decrease in [0, 1) (got {args.effect_size}); "
@@ -130,29 +136,33 @@ def main(argv: list[str] | None = None) -> int:
         if target not in guides_of:
             raise SystemExit(f"no gRNA maps to target {target!r} in grna_targets.tsv")
         at = time.perf_counter()
-        frames.append(
-            simulate_target(
-                sim,
-                target,
-                list(genes),
-                guides_of[target],
-                effect_size=args.effect_size,
-                reps=reps,
-                seed=args.seed,
-                params=params,
-                grna_csc=grna_csc,
-                guide_sd=args.guide_sd,
-                n_jobs=args.n_jobs,
-                expression_model=args.expression_model,
-            )
+        frame = simulate_target(
+            sim,
+            target,
+            list(genes),
+            guides_of[target],
+            effect_size=args.effect_size,
+            reps=reps,
+            seed=args.seed,
+            params=params,
+            grna_csc=grna_csc,
+            guide_sd=args.guide_sd,
+            n_jobs=args.n_jobs,
+            expression_model=args.expression_model,
         )
+        if frame is None:
+            print(f"  {target}: skipped, no perturbed cells")
+            continue
+        frames.append(frame)
         elapsed = time.perf_counter() - at
         print(
             f"  {target}: {len(genes)} pairs in {elapsed:.1f}s "
             f"({elapsed / args.reps:.2f}s/replicate)"
         )
 
-    combined = pd.concat(frames, ignore_index=True)
+    # Every target in the split can have been skipped; an empty table with the
+    # right columns keeps the row-count check downstream meaningful.
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=KEEP)
     for column in ("pass_qc", "n_nonzero_trt", "n_nonzero_cntrl"):
         if column not in combined:
             combined[column] = np.nan

@@ -6,7 +6,12 @@ checked they are right, so they are tested before anything times them.
 
 from __future__ import annotations
 
+import warnings
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
+import pandas as pd
 import pytest
 from scipy import sparse
 
@@ -100,9 +105,10 @@ def test_a_cell_with_no_guide_gets_the_no_effect_row():
 
 
 def test_control_cells_are_given_guides_from_outside_the_target():
-    """The reason this matters: a control cell's guide draws an effect size
-    around 1 with the same spread. Sent to the no-effect row instead, the
-    control arm keeps its mean and loses its variance."""
+    """A control cell's status must point past the target's block, so it can
+    never pick up a targeting effect. The guide it points at has an effect of
+    exactly 1 (other guides do not move the tested genes; see the module
+    docstring of watteg.perturbation)."""
     grna_ids, grna, target_ids, cre = tiny_screen()
     perturbed = target_cells(cre, target_ids, "elemA")
     a = guide_assignment(
@@ -150,27 +156,189 @@ def test_an_unknown_target_and_a_target_with_no_usable_guide_are_refused():
 # --- effect sizes ------------------------------------------------------------------------
 
 
-def test_each_arm_is_centred_on_what_it_should_average_to():
-    """The property the centring step exists for: clamping negatives biases the
-    mean up, so "a 15% knockdown" would otherwise be slightly weaker."""
-    rng = np.random.default_rng(3)
-    n_cells = 400
-    status = rng.integers(0, 6, size=n_cells)
-    is_pert = np.zeros(n_cells, dtype=bool)
-    is_pert[: n_cells // 2] = True
-    status[is_pert] = rng.integers(0, 3, size=is_pert.sum())  # 0..2: no guide or target guides
-    status[~is_pert] = rng.integers(3, 6, size=(~is_pert).sum())
-    a = type(
-        "A",
-        (),
-        {"status": status, "is_perturbed": is_pert, "n_target_guides": 2, "n_other_guides": 3},
-    )()
+# --- the shared fixture: proof tests on the production path ------------------------------
+#
+# tests/fixtures/ holds a design the R suite reads byte for byte: 150 perturbed cells
+# interleaved among 3,000, 26 carrying two of the target's guides, a listed target guide
+# (t8) that no cell carries, and 454 control cells with no guide. Everything below drives
+# the real guide_assignment() and effect_size_matrix() on it. The estimand being proven was
+# decided on 2026-09-24 (docs/methods.md): power at a FIXED element effect. The realised mean
+# over the perturbed cells equals the requested one in every replicate, the target's guides
+# still differ, and every other cell is exactly 1.
 
-    wanted = np.array([0.85, 0.5, 0.95])
-    matrix = effect_size_matrix(a, wanted, guide_sd=0.13, rng=rng)
-    assert matrix.shape == (3, n_cells)
-    np.testing.assert_allclose(matrix[:, is_pert].mean(axis=1), wanted)
-    np.testing.assert_allclose(matrix[:, ~is_pert].mean(axis=1), 1.0)
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def interleaved_fixture():
+    design = pd.read_csv(
+        FIXTURES / "interleaved_design.tsv", sep="\t", dtype=str, keep_default_na=False
+    )
+    guides = pd.read_csv(
+        FIXTURES / "interleaved_guides.tsv", sep="\t", dtype=str, keep_default_na=False
+    )
+    grna_ids = guides["grna_id"].tolist()
+    index = {g: i for i, g in enumerate(grna_ids)}
+    carried = [g.split(";") if g else [] for g in design["guides"]]
+    rows = [index[g] for c in carried for g in c]
+    cols = [j for j, c in enumerate(carried) for _ in c]
+    grna = sparse.csc_matrix(
+        (np.ones(len(rows)), (rows, cols)), shape=(len(grna_ids), len(carried))
+    )
+    return SimpleNamespace(
+        grna=grna,
+        grna_ids=grna_ids,
+        carried=carried,
+        is_perturbed=design["pert"].to_numpy() == "1",
+        target_guides=guides.loc[guides["is_target"] == "1", "grna_id"].tolist(),
+        other_guides=guides.loc[guides["is_target"] == "0", "grna_id"].tolist(),
+    )
+
+
+def fixture_assignment(seed=1):
+    fx = interleaved_fixture()
+    fx.assignment = guide_assignment(
+        fx.grna, fx.grna_ids, fx.target_guides, fx.is_perturbed, np.random.default_rng(seed)
+    )
+    return fx
+
+
+@pytest.mark.parametrize("es", [0.05, 0.15, 0.5])
+def test_the_realised_mean_is_pinned_and_control_cells_are_exactly_one(es):
+    fx = fixture_assignment()
+    wanted = np.full(3, 1.0 - es)
+    rng = np.random.default_rng(100)
+    for _ in range(50):
+        m = effect_size_matrix(fx.assignment, wanted, guide_sd=0.13, rng=rng)
+        np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), wanted, rtol=0, atol=1e-12)
+        assert (m[:, ~fx.is_perturbed] == 1.0).all()
+
+
+def test_without_the_pin_the_realised_mean_would_wander():
+    """What the pin removes. Drawing the same guide effects and applying them
+    without pinning, the realised mean varies from replicate to replicate by
+    about guide_sd * sqrt(sum n_g^2) / sum n_g -- the other estimand, random
+    guide effects."""
+    fx = fixture_assignment()
+    status = fx.assignment.status[fx.is_perturbed]
+    rng = np.random.default_rng(8)
+    means = []
+    for _ in range(200):
+        draws = np.clip(rng.normal(0.85, 0.13, size=fx.assignment.n_target_guides), 0.0, None)
+        means.append(draws[status - 1].mean())
+    assert np.std(means) > 0.01
+
+
+def test_the_guide_status_is_each_cells_own_guide():
+    fx = fixture_assignment()
+    a = fx.assignment
+    assert a.status.size == len(fx.carried)
+    n_t = a.n_target_guides
+    for j, carried in enumerate(fx.carried):
+        s = a.status[j]
+        if fx.is_perturbed[j]:
+            assert 1 <= s <= n_t and fx.target_guides[s - 1] in carried, f"cell {j}"
+        elif not carried:
+            assert s == 0, f"cell {j}"
+        else:
+            assert s > n_t and fx.other_guides[s - n_t - 1] in carried, f"cell {j}"
+
+    # Cells carrying the same guide get the same effect within a replicate.
+    m = effect_size_matrix(a, np.array([0.85]), guide_sd=0.13, rng=np.random.default_rng(13))
+    perturbed_status = a.status[fx.is_perturbed]
+    values = m[0, fx.is_perturbed]
+    for s in np.unique(perturbed_status):
+        assert np.ptp(values[perturbed_status == s]) == 0
+
+
+def test_pinning_the_mean_keeps_the_guide_to_guide_spread():
+    """The pin adds one constant per gene; it must not flatten the guides. With
+    n_g perturbed cells on guide g and N in total, the expected within-replicate
+    variance is guide_sd^2 * (1 - sum n_g^2 / N^2)."""
+    fx = fixture_assignment()
+    status = fx.assignment.status[fx.is_perturbed]
+    n_g = np.bincount(status, minlength=fx.assignment.n_target_guides + 1)[1:]
+    expected = 0.13**2 * (1 - (n_g**2).sum() / n_g.sum() ** 2)
+    rng = np.random.default_rng(9)
+    within = [
+        effect_size_matrix(fx.assignment, np.array([0.85]), guide_sd=0.13, rng=rng)[
+            0, fx.is_perturbed
+        ].var()
+        for _ in range(400)
+    ]
+    np.testing.assert_allclose(np.mean(within), expected, rtol=0.1)
+
+
+def test_no_control_cell_indexes_a_targeting_row_even_when_the_last_target_guide_is_unused():
+    """t8 is listed last and carried by no cell. R offset control statuses by the
+    highest target index any cell carried (7) and put guide o001 on t8's row;
+    this implementation offsets by the number of target guides."""
+    fx = fixture_assignment()
+    assert "t8" not in {g for c in fx.carried for g in c}
+    control_status = fx.assignment.status[~fx.is_perturbed]
+    assert ((control_status == 0) | (control_status > fx.assignment.n_target_guides)).all()
+
+    m = effect_size_matrix(
+        fx.assignment, np.array([0.5]), guide_sd=0.0, rng=np.random.default_rng(0)
+    )
+    assert (m[0, fx.is_perturbed] == 0.5).all()
+    assert (m[0, ~fx.is_perturbed] == 1.0).all()
+
+
+@pytest.mark.parametrize("es", [0.7, 0.9])
+def test_strong_knockdowns_are_pinned_too(es):
+    fx = fixture_assignment()
+    wanted = np.full(2, 1.0 - es)
+    rng = np.random.default_rng(11)
+    for _ in range(30):
+        m = effect_size_matrix(fx.assignment, wanted, guide_sd=0.13, rng=rng)
+        assert (m >= 0).all()
+        np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), wanted, rtol=0, atol=1e-12)
+
+
+def test_a_pin_that_cannot_be_reached_is_an_error_not_a_miss():
+    """Perturbed cells at 0, 0 and 0.9 with a target of 0.1: one shift of -0.2
+    sends two of them below zero, and clamping them leaves the mean at 0.233.
+    Allowed a single pass it must say so; allowed more, it pins exactly."""
+    a = SimpleNamespace(
+        status=np.array([2, 2, 1, 0, 0]),
+        is_perturbed=np.array([True, True, True, False, False]),
+        n_target_guides=2,
+        n_other_guides=0,
+    )
+
+    class Fixed:
+        """Guide 1 draws 0.9, guide 2 draws 0."""
+
+        def normal(self, loc, scale, size):
+            return np.array([[0.9], [0.0]])
+
+    with pytest.raises(ValueError, match="could not pin"):
+        effect_size_matrix(a, np.array([0.1]), guide_sd=0.13, rng=Fixed(), max_iter=1)
+    m = effect_size_matrix(a, np.array([0.1]), guide_sd=0.13, rng=Fixed())
+    assert m[0, :3].mean() == pytest.approx(0.1, abs=1e-12)
+    assert (m >= 0).all()
+
+
+def test_a_target_that_perturbs_no_cell_is_skipped_not_fatal():
+    """R skips it. Raising used to kill the whole split and every other target in it."""
+    from watteg.engine import simulate_target
+
+    sim = SimpleNamespace(cre_perts=sparse.csr_matrix((1, 4)), target_ids=["elemX"])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        out = simulate_target(
+            sim,
+            "elemX",
+            ["g1"],
+            ["gX"],
+            effect_size=0.15,
+            reps=range(1, 2),
+            seed=1,
+            params=None,
+            grna_csc=None,
+        )
+    assert out is None
+    assert any("perturbs no cell" in str(w.message) for w in caught)
 
 
 def test_effect_sizes_never_go_negative():

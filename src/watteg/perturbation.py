@@ -10,11 +10,19 @@ That is why the pipeline needs per-gRNA assignments at all, and why the
 per-target union sceptre keeps is not enough (see
 `docs/pysceptre-backend.md` section 5.1).
 
-**Control cells carry guides too**, and they matter. A cell not perturbed by
-this target is usually perturbed by something else -- another element, or a
-non-targeting guide -- and that guide draws an effect size around 1 with the
-same guide-to-guide spread. Dropping them would leave every control cell at
-exactly 1, which keeps the control arm's mean and removes its variance.
+**Other guides have no effect on the tested genes.** A control cell usually
+carries a guide for some other element, or a non-targeting one, and that guide
+does not move this gene: its effect is exactly 1. The dispersion the counts are
+drawn with was fitted to real cells that already carry their real guides, so
+it already contains whatever those guides do. Until 2026-09-24 every other
+guide drew an extra N(1, guide_sd), as in the original DC-TAP code. That
+counted the noise twice (theta 146 refit to 42 on a gene's own simulated null
+data) and understated power for highly expressed, low-dispersion genes.
+
+**The perturbed cells' mean is pinned.** Simulated power is power at a FIXED
+element effect (decided 2026-09-24; see docs/methods.md): in every replicate
+the realised mean effect across the perturbed cells equals the requested one.
+The target's guides still differ from each other; only their mean is fixed.
 
 **Built directly in cell order.** R assembled the guide assignment as
 perturbed-cells-then-control-cells and then permuted it back, a legacy of
@@ -158,43 +166,64 @@ def effect_size_matrix(
     gene_effect_sizes: np.ndarray,
     guide_sd: float,
     rng: np.random.Generator,
+    *,
+    tol: float = 1e-12,
+    max_iter: int = 200,
 ) -> np.ndarray:
-    """A (genes x cells) multiplier, with each guide's own effect size.
+    """A (genes x cells) multiplier, with each of the target's guides at its own effect.
 
     `gene_effect_sizes` is the *relative expression* the target aims for -- a
     15% knockdown is 0.85 -- one per gene. Each of the target's guides draws
-    around it, each other guide draws around 1, and negatives clamp to 0
-    because a guide cannot make expression negative.
+    around it, independently per gene, and negatives clamp to 0 because a guide
+    cannot make expression negative. Every other guide, and every cell carrying
+    no guide, is exactly 1.
 
-    Clamping biases the mean upward, so both arms are re-centred afterwards:
-    that is what makes "effect size 0.15" mean a 15% knockdown on average
-    rather than something slightly weaker. R did this in a separate
-    `center_effect_size_matrix()`; it is one step here because the two are not
-    separately meaningful.
+    Then each gene's mean over the perturbed cells is **pinned** to what was
+    asked for. That is what makes simulated power the power at a fixed element
+    effect (see the module docstring). It is not a correction for clamping,
+    which is what this docstring used to claim: at es 0.15 a guide clamps with
+    probability ~3e-11. Shift, clamp at 0, repeat. One shift is exact wherever
+    nothing clamps, which is every realistic case up to es 0.5. At strong
+    knockdowns (es >= 0.7) clamping after the shift lifts the mean back above
+    the target, and the next shift corrects it; this converges to
+    max(draw + c, 0) with the constant c that hits the target exactly. If the
+    pin cannot be reached this raises instead of returning a matrix that
+    silently misses. R does the same in `center_effect_size_matrix()`.
     """
     gene_effect_sizes = np.asarray(gene_effect_sizes, dtype=float)
     n_genes = gene_effect_sizes.size
     n_target, n_other = assignment.n_target_guides, assignment.n_other_guides
 
-    # Row 0 is the no-effect row, for cells carrying no guide at all.
-    table = np.empty((1 + n_target + n_other, n_genes))
-    table[0] = 1.0
+    # Row 0 is the no-effect row, for cells carrying no guide at all; the rows
+    # after the target's block belong to other guides. Both stay at exactly 1.
+    table = np.ones((1 + n_target + n_other, n_genes))
     table[1 : 1 + n_target] = rng.normal(gene_effect_sizes, guide_sd, size=(n_target, n_genes))
-    table[1 + n_target :] = rng.normal(1.0, guide_sd, size=(n_other, n_genes))
     np.clip(table, 0.0, None, out=table)
 
     matrix = table[assignment.status].T  # (genes, cells)
 
-    # Re-centre each arm on what it is supposed to average to. Cells carrying
-    # no guide sit at exactly 1 and move with their arm, as in R.
-    for mask, target_mean in (
-        (assignment.is_perturbed, gene_effect_sizes),
-        (~assignment.is_perturbed, 1.0),
-    ):
-        if not mask.any():
-            continue
-        block = matrix[:, mask]
-        shift = target_mean - block.mean(axis=1)
-        matrix[:, mask] = block + shift[:, None]
-    np.clip(matrix, 0.0, None, out=matrix)
+    control = ~assignment.is_perturbed
+    if (matrix[:, control] != 1.0).any():
+        raise RuntimeError(
+            "control cells must carry an effect of exactly 1; a control cell's guide "
+            "status points into the target's block"
+        )
+
+    perturbed = assignment.is_perturbed
+    if perturbed.any():
+        block = matrix[:, perturbed]
+        for _ in range(max_iter):
+            gap = gene_effect_sizes - block.mean(axis=1)
+            if np.all(np.abs(gap) < tol):
+                break
+            block = block + gap[:, None]
+            np.clip(block, 0.0, None, out=block)
+        gap = gene_effect_sizes - block.mean(axis=1)
+        if np.any(np.abs(gap) >= tol):
+            raise ValueError(
+                "could not pin the realised mean effect to the requested one (largest miss "
+                f"{np.abs(gap).max():.3g} after {max_iter} iterations): too many guide effects "
+                "clamp at zero for this effect size and guide_sd"
+            )
+        matrix[:, perturbed] = block
     return matrix

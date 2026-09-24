@@ -24,6 +24,7 @@ reuse.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,8 +84,10 @@ def simulate_target(
     guide_sd: float = DEFAULT_GUIDE_SD,
     n_jobs: int = 8,
     expression_model: str = "fitted",
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """Simulate and test one target, returning one row per (pair, replicate).
+
+    Returns None, with a warning, for a target that perturbs no cell.
 
     The guide assignment and the baseline are drawn once per target: which
     guide a cell carries is a fact about the screen, and the baseline depends
@@ -95,7 +98,10 @@ def simulate_target(
     is_perturbed = target_cells(sim.cre_perts, sim.target_ids, target)
     n_perturbed = int(is_perturbed.sum())
     if n_perturbed == 0:
-        raise ValueError(f"target {target!r} perturbs no cell")
+        # Skipped, as R skips it. Raising here used to kill the whole split, and
+        # with it every other target's pairs in that task.
+        warnings.warn(f"skipping target {target!r}: it perturbs no cell", stacklevel=2)
+        return None
 
     assignment = guide_assignment(
         grna_csc,
