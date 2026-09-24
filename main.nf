@@ -145,8 +145,10 @@ workflow {
     // so it is mixed in with a default rather than joined, which would drop the sample entirely.
     ch_sim_inputs = PREPARE_SIM_INPUT.out.sim_input
         .join(PREPARE_SIM_INPUT.out.grna_targets)
+        .join(PREPARE_SIM_INPUT.out.analysis_mode)
         .join(PREPARE_SIM_INPUT.out.pairs_with_info, remainder: true)
-        .map { meta, sim_input, grna_targets, info -> [meta, sim_input, grna_targets, info ?: []] }
+        .map { meta, sim_input, grna_targets, analysis_mode, info ->
+            [meta, sim_input, grna_targets, analysis_mode, info ?: []] }
 
     ch_rep_chunks = Channel
         .of(0..<(params.num_replicates.intdiv(params.reps_per_chunk)))
@@ -156,7 +158,8 @@ workflow {
     // than with every sample's.
     // No trailing map: `combine` flattens the [offset, reps] pair into two elements rather than
     // keeping it as one, so this already emits the nine fields POWER_SIMULATION declares --
-    // meta, sim_input, grna_targets, pairs_with_info, split, effect_size, rep_offset, reps.
+    // meta, sim_input, grna_targets, analysis_mode, pairs_with_info, split, effect_size,
+    // rep_offset, reps.
     ch_sim_tasks = ch_sim_inputs
         .combine(ch_splits, by: 0)
         .combine(Channel.fromList(params.effect_sizes))
@@ -179,8 +182,11 @@ workflow {
     // failed consolidation loses nothing.
     CONSOLIDATE_REPLICATES(ch_by_es)
 
-    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet.map { meta, es, f -> [meta, es, [f]] },
-                  PREPARE_SIM_INPUT.out.threshold.first())
+    // Each sample's own threshold, joined on the meta key -- not `.first()`, which scored every
+    // sample of a multi-sample run against sample 1's.
+    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet
+                      .map { meta, es, f -> [meta, es, [f]] }
+                      .combine(PREPARE_SIM_INPUT.out.threshold, by: 0))
 
     // ---- step 6: one row per pair across every effect size ---------------------------------
     ch_all_power = COMPUTE_POWER.out.power

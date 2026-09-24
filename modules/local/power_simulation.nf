@@ -24,7 +24,10 @@ process POWER_SIMULATION {
     // work directory until Nextflow cleans it, so a failed consolidation cannot lose data.
 
     input:
-    tuple val(meta), path(sim_input), path(grna_targets), path(pairs_with_info),
+    // analysis_mode.tsv is read by the CLI from --prepared (here, the task directory). It was not
+    // staged until 2026-09-24, so every real run of this process died with FileNotFoundError and
+    // every Python number so far came from direct CLI calls; the stub never reads it.
+    tuple val(meta), path(sim_input), path(grna_targets), path(analysis_mode), path(pairs_with_info),
           path(split), val(effect_size), val(rep_offset), val(reps)
 
     output:
