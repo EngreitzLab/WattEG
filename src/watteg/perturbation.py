@@ -161,6 +161,29 @@ def guide_assignment(
     )
 
 
+def _pin_to_mean(block: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Row by row, the values max(v + c, 0) whose mean is exactly `target`.
+
+    f(c) = mean(max(v + c, 0)) is continuous, non-decreasing and piecewise
+    linear, with a kink where each value hits zero, so for any target > 0 it has
+    a root. Sorting a row in decreasing order: if exactly the top j values stay
+    positive, f(c) = (sum of those j + j * c) / n, so c = (n * target - sum) / j.
+    The right j is the largest one whose kink, f(-s_j), is still at or below the
+    target. One sort per row, no iteration, exact to rounding. Same algorithm as
+    R's `pin_to_mean()`.
+    """
+    n = block.shape[1]
+    s = -np.sort(-block, axis=1)  # each row in decreasing order
+    cs = np.cumsum(s, axis=1)
+    j = np.arange(1, n + 1)
+    f_at_kink = (cs - j * s) / n  # the mean when the j-th largest value just reaches 0
+    ok = f_at_kink <= target[:, None]
+    # Largest j (1-based) with ok. f_at_kink[:, 0] is 0, so every row has one.
+    last = n - np.argmax(ok[:, ::-1], axis=1)
+    shift = (n * target - cs[np.arange(block.shape[0]), last - 1]) / last
+    return np.clip(block + shift[:, None], 0.0, None)
+
+
 def effect_size_matrix(
     assignment: GuideAssignment,
     gene_effect_sizes: np.ndarray,
@@ -168,7 +191,6 @@ def effect_size_matrix(
     rng: np.random.Generator,
     *,
     tol: float = 1e-12,
-    max_iter: int = 200,
 ) -> np.ndarray:
     """A (genes x cells) multiplier, with each of the target's guides at its own effect.
 
@@ -182,13 +204,13 @@ def effect_size_matrix(
     asked for. That is what makes simulated power the power at a fixed element
     effect (see the module docstring). It is not a correction for clamping,
     which is what this docstring used to claim: at es 0.15 a guide clamps with
-    probability ~3e-11. Shift, clamp at 0, repeat. One shift is exact wherever
-    nothing clamps, which is every realistic case up to es 0.5. At strong
-    knockdowns (es >= 0.7) clamping after the shift lifts the mean back above
-    the target, and the next shift corrects it; this converges to
-    max(draw + c, 0) with the constant c that hits the target exactly. If the
-    pin cannot be reached this raises instead of returning a matrix that
-    silently misses. R does the same in `center_effect_size_matrix()`.
+    probability ~3e-11. The result is max(v + c, 0), where v are the perturbed
+    cells' already-clamped effects and c is the one constant that puts the mean
+    exactly on the target (`_pin_to_mean`). Where nothing would clamp, which is
+    every realistic case up to es 0.5, that is a plain shift. An earlier version
+    shifted, clamped and repeated; once most cells clamp that converges slowly,
+    and at es >= ~0.99 it ran out of iterations and raised on a pin that exists.
+    R does the same in `center_effect_size_matrix()`.
     """
     gene_effect_sizes = np.asarray(gene_effect_sizes, dtype=float)
     n_genes = gene_effect_sizes.size
@@ -211,19 +233,12 @@ def effect_size_matrix(
 
     perturbed = assignment.is_perturbed
     if perturbed.any():
-        block = matrix[:, perturbed]
-        for _ in range(max_iter):
-            gap = gene_effect_sizes - block.mean(axis=1)
-            if np.all(np.abs(gap) < tol):
-                break
-            block = block + gap[:, None]
-            np.clip(block, 0.0, None, out=block)
+        block = _pin_to_mean(matrix[:, perturbed], gene_effect_sizes)
         gap = gene_effect_sizes - block.mean(axis=1)
-        if np.any(np.abs(gap) >= tol):
+        if not np.all(np.isfinite(gap)) or np.any(np.abs(gap) >= tol):
             raise ValueError(
                 "could not pin the realised mean effect to the requested one (largest miss "
-                f"{np.abs(gap).max():.3g} after {max_iter} iterations): too many guide effects "
-                "clamp at zero for this effect size and guide_sd"
+                f"{np.nanmax(np.abs(gap)) if np.isfinite(gap).any() else float('nan'):.3g})"
             )
         matrix[:, perturbed] = block
     return matrix

@@ -284,39 +284,86 @@ def test_no_control_cell_indexes_a_targeting_row_even_when_the_last_target_guide
     assert (m[0, ~fx.is_perturbed] == 1.0).all()
 
 
-@pytest.mark.parametrize("es", [0.7, 0.9])
-def test_strong_knockdowns_are_pinned_too(es):
+@pytest.mark.parametrize("es", [0.7, 0.9, 0.99, 0.999])
+def test_strong_knockdowns_are_pinned_exactly(es):
+    """es 0.99 and 0.999 are where the old shift-clamp-repeat loop ran out of
+    iterations and raised on a pin that exists: with only one guide left above
+    zero it converged by a factor of 0.9 per pass."""
     fx = fixture_assignment()
     wanted = np.full(2, 1.0 - es)
     rng = np.random.default_rng(11)
-    for _ in range(30):
+    for _ in range(200):
         m = effect_size_matrix(fx.assignment, wanted, guide_sd=0.13, rng=rng)
         assert (m >= 0).all()
         np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), wanted, rtol=0, atol=1e-12)
 
 
-def test_a_pin_that_cannot_be_reached_is_an_error_not_a_miss():
-    """Perturbed cells at 0, 0 and 0.9 with a target of 0.1: one shift of -0.2
-    sends two of them below zero, and clamping them leaves the mean at 0.233.
-    Allowed a single pass it must say so; allowed more, it pins exactly."""
+def test_the_pin_is_solved_exactly_as_a_root_finder_would():
+    from scipy.optimize import brentq
+
+    from watteg.perturbation import _pin_to_mean
+
+    # Cells at 0, 0 and 0.9 with a target of 0.1: a plain shift of -0.2 would send
+    # two cells below zero and leave the mean at 0.233. The exact answer shifts by -0.6.
+    np.testing.assert_allclose(
+        _pin_to_mean(np.array([[0.0, 0.0, 0.9]]), np.array([0.1])), [[0.0, 0.0, 0.3]], atol=1e-15
+    )
+
+    rng = np.random.default_rng(21)
+    for _ in range(50):
+        v = np.clip(np.repeat(rng.normal(0.1, 0.3, 6), rng.integers(1, 41, 6)), 0.0, None)
+        target = rng.uniform(0.001, 0.5)
+        c = brentq(
+            lambda c, v, target: np.maximum(v + c, 0).mean() - target,
+            -2,
+            2,
+            args=(v, target),
+            xtol=1e-14,
+        )
+        got = _pin_to_mean(v[None, :], np.array([target]))[0]
+        np.testing.assert_allclose(got, np.maximum(v + c, 0), atol=1e-9)
+        assert got.mean() == pytest.approx(target, abs=1e-12)
+
+    # No clamping needed: the plain shift, to rounding -- every case up to es 0.5.
+    v = np.array([[0.8, 0.9, 1.0]])
+    np.testing.assert_allclose(_pin_to_mean(v, np.array([0.85])), v - 0.05, atol=1e-15)
+
+
+def test_a_non_finite_effect_is_a_loud_error():
     a = SimpleNamespace(
-        status=np.array([2, 2, 1, 0, 0]),
-        is_perturbed=np.array([True, True, True, False, False]),
-        n_target_guides=2,
+        status=np.array([1, 1, 0]),
+        is_perturbed=np.array([True, True, False]),
+        n_target_guides=1,
         n_other_guides=0,
     )
 
-    class Fixed:
-        """Guide 1 draws 0.9, guide 2 draws 0."""
-
+    class NaNDraw:
         def normal(self, loc, scale, size):
-            return np.array([[0.9], [0.0]])
+            return np.full(size, np.nan)
 
     with pytest.raises(ValueError, match="could not pin"):
-        effect_size_matrix(a, np.array([0.1]), guide_sd=0.13, rng=Fixed(), max_iter=1)
-    m = effect_size_matrix(a, np.array([0.1]), guide_sd=0.13, rng=Fixed())
-    assert m[0, :3].mean() == pytest.approx(0.1, abs=1e-12)
-    assert (m >= 0).all()
+        effect_size_matrix(a, np.array([0.8]), guide_sd=0.13, rng=NaNDraw())
+
+
+def test_at_effect_size_zero_the_mean_is_exactly_one_and_the_guides_still_differ():
+    fx = fixture_assignment()
+    m = effect_size_matrix(
+        fx.assignment, np.array([1.0, 1.0]), guide_sd=0.13, rng=np.random.default_rng(22)
+    )
+    np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), 1.0, rtol=0, atol=1e-12)
+    assert (m[:, ~fx.is_perturbed] == 1.0).all()
+    assert m[0, fx.is_perturbed].std() > 0.05
+
+
+def test_each_gene_draws_its_own_guide_effects():
+    """One draw shared across genes would make every tested gene of a target move together."""
+    fx = fixture_assignment()
+    m = effect_size_matrix(
+        fx.assignment, np.full(3, 0.85), guide_sd=0.13, rng=np.random.default_rng(23)
+    )
+    values = m[:, fx.is_perturbed]
+    assert not np.allclose(values[0], values[1])
+    assert not np.allclose(values[1], values[2])
 
 
 def test_a_target_that_perturbs_no_cell_is_skipped_not_fatal():
