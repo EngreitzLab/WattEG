@@ -28,15 +28,15 @@ process PREPARE_SIM_INPUT {
     script:
     // response_odm is [] (no files staged) for every sample whose response matrix isn't odm-backed.
     def response_odm_flag = response_odm ? "--response-odm ${response_odm}" : ''
-    def control_cells = params.n_control_cells ? "--n-control-cells ${params.n_control_cells}" : ''
-    def batches       = params.cell_batches    ? "--cell-batches ${params.cell_batches}"       : ''
-    def alpha         = params.alpha           ? "--alpha ${params.alpha}"                     : ''
+    // --n-control-cells, --cell-batches and --alpha used to be passed here. prepare_sim_input.R
+    // declares none of them, so setting any of those params made this step die on an optparse
+    // error. They belong to run_power_simulation.R and compute_power.R respectively.
     """
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         Rscript ${projectDir}/src/prepare_sim_input.R \\
             --sceptre-object ${sceptre_object} \\
             --outdir . \\
-            ${response_odm_flag} ${control_cells} ${batches} ${alpha}
+            ${response_odm_flag}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
