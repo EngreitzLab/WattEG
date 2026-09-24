@@ -329,6 +329,22 @@ def test_the_pin_is_solved_exactly_as_a_root_finder_would():
     np.testing.assert_allclose(_pin_to_mean(v, np.array([0.85])), v - 0.05, atol=1e-15)
 
 
+@pytest.mark.parametrize("n", [50_000, 100_000, 300_000])
+def test_the_pin_stays_exact_on_very_large_targets(n):
+    """Perturbed-cell effects take one of a few guide values, so the closed
+    form's cumulative sum adds up rounding instead of cancelling it. Before the
+    correction step, 5e4 cells missed by ~1e-12 and raised."""
+    from watteg.perturbation import _pin_to_mean
+
+    rng = np.random.default_rng(24)
+    for es in (0.0, 0.15, 0.5, 0.9):
+        vals = np.clip(rng.normal(1 - es, 0.13, 4), 0.0, None)
+        v = vals[rng.integers(0, 4, n)]
+        out = _pin_to_mean(v[None, :], np.array([1 - es]))[0]
+        assert (out >= 0).all()
+        assert abs(out.mean() - (1 - es)) < 1e-14
+
+
 def test_a_non_finite_effect_is_a_loud_error():
     a = SimpleNamespace(
         status=np.array([1, 1, 0]),

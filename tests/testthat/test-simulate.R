@@ -389,6 +389,23 @@ test_that("pin_to_mean finds the one shift that hits the target, as a root-finde
                "Could not pin")
 })
 
+test_that("the pin stays exact on very large targets, where tied values pile up rounding", {
+  # Perturbed-cell effects take one of a few guide values, so the closed form's cumulative sum adds
+  # up rounding instead of cancelling it. Before the correction step, 5e4 cells missed by ~1e-12 and
+  # stopped the task.
+  set.seed(24)
+  for (n in c(5e4, 1e5, 3e5)) {
+    for (es in c(0, 0.15, 0.5, 0.9)) {
+      vals <- pmax(rnorm(4, 1 - es, 0.13), 0)
+      v <- vals[sample.int(4, n, replace = TRUE)]
+      out <- pin_to_mean(v, 1 - es)
+      expect_true(all(out >= 0))
+      expect_lt(abs(mean(out) - (1 - es)), 1e-14)
+      expect_no_error(center_effect_size_matrix(rbind(v), rep(1, n), 1 - es))
+    }
+  }
+})
+
 test_that("at effect size 0 the perturbed mean is exactly 1 and the guides still differ", {
   fx <- fixture_target()
   is_pert <- fx$pert_status == 1

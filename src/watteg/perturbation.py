@@ -169,8 +169,13 @@ def _pin_to_mean(block: np.ndarray, target: np.ndarray) -> np.ndarray:
     a root. Sorting a row in decreasing order: if exactly the top j values stay
     positive, f(c) = (sum of those j + j * c) / n, so c = (n * target - sum) / j.
     The right j is the largest one whose kink, f(-s_j), is still at or below the
-    target. One sort per row, no iteration, exact to rounding. Same algorithm as
-    R's `pin_to_mean()`.
+    target. One sort per row, no iteration.
+
+    The closed form carries the rounding of a long cumulative sum, and
+    perturbed-cell effects are heavily tied (each cell takes one of a few guide
+    values), so that error adds up rather than cancelling: at tens of thousands
+    of cells it reached ~1e-12. One correction step on the linear piece the
+    solution lies on removes it. Same algorithm as R's `pin_to_mean()`.
     """
     n = block.shape[1]
     s = -np.sort(-block, axis=1)  # each row in decreasing order
@@ -181,7 +186,11 @@ def _pin_to_mean(block: np.ndarray, target: np.ndarray) -> np.ndarray:
     # Largest j (1-based) with ok. f_at_kink[:, 0] is 0, so every row has one.
     last = n - np.argmax(ok[:, ::-1], axis=1)
     shift = (n * target - cs[np.arange(block.shape[0]), last - 1]) / last
-    return np.clip(block + shift[:, None], 0.0, None)
+    out = np.clip(block + shift[:, None], 0.0, None)
+    positive = out > 0
+    k = positive.sum(axis=1)
+    delta = np.where(k > 0, (target - out.mean(axis=1)) * n / np.maximum(k, 1), 0.0)
+    return np.where(positive, np.clip(out + delta[:, None], 0.0, None), out)
 
 
 def effect_size_matrix(
@@ -207,7 +216,7 @@ def effect_size_matrix(
     probability ~3e-11. The result is max(v + c, 0), where v are the perturbed
     cells' already-clamped effects and c is the one constant that puts the mean
     exactly on the target (`_pin_to_mean`). Where nothing would clamp, which is
-    every realistic case up to es 0.5, that is a plain shift. An earlier version
+    every realistic case up to es 0.5, that is the plain shift, to a few ulps. An earlier version
     shifted, clamped and repeated; once most cells clamp that converges slowly,
     and at es >= ~0.99 it ran out of iterations and raised on a pin that exists.
     R does the same in `center_effect_size_matrix()`.
@@ -235,7 +244,10 @@ def effect_size_matrix(
     if perturbed.any():
         block = _pin_to_mean(matrix[:, perturbed], gene_effect_sizes)
         gap = gene_effect_sizes - block.mean(axis=1)
-        if not np.all(np.isfinite(gap)) or np.any(np.abs(gap) >= tol):
+        # The check is for real failures (NaN, a logic error), not rounding, so its
+        # tolerance grows with the number of perturbed cells as summation error does.
+        allowed = max(tol, 4 * block.shape[1] * np.finfo(float).eps)
+        if not np.all(np.isfinite(gap)) or np.any(np.abs(gap) >= allowed):
             raise ValueError(
                 "could not pin the realised mean effect to the requested one (largest miss "
                 f"{np.nanmax(np.abs(gap)) if np.isfinite(gap).any() else float('nan'):.3g})"

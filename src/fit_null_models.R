@@ -71,6 +71,13 @@ option_list <- list(
   make_option("--seed", type = "integer", default = NULL, dest = "seed",
               help = paste("RNG seed. Must be the same --seed the simulation uses, or the null",
                            "models will not correspond to the simulations they are used for.")),
+  make_option("--expression-model", type = "character", default = "fitted",
+              dest = "expression_model",
+              help = paste("Where a gene's unperturbed expected counts come from. Must match",
+                           "run_power_simulation.R's --expression-model: a null model fitted to",
+                           "counts on one scale and applied to counts on another is not a null",
+                           "model of anything [default %default]. See baseline_expression() in",
+                           "lib/simulate.R.")),
   make_option("--out", type = "character", default = NULL, dest = "out",
               help = "Output RDS: a list of @response_precomputations, named by replicate.")
 )
@@ -81,6 +88,10 @@ opts <- parse_args(OptionParser(
 ))
 require_options(opts, c("sim_input", "sceptre_template", "grna_targets", "reps", "seed", "out"))
 if (opts$reps < 1) stop("--reps must be at least 1.", call. = FALSE)
+if (!opts$expression_model %in% c("fitted", "size_factor")) {
+  stop("--expression-model must be 'fitted' or 'size_factor' (got ", opts$expression_model, ").",
+       call. = FALSE)
+}
 
 init_seed(opts$seed)
 
@@ -151,11 +162,18 @@ null_template <- template
 null_template@discovery_pairs_with_info <- representative
 
 log_step("Fitting ", length(genes), " null models x ", opts$reps, " simulations over ",
-         n_cells, " cells")
+         n_cells, " cells (expression model: ", opts$expression_model, ")")
 
 # No knockdown: relative expression is 1 everywhere. Built once -- it does not vary by simulation, and
 # at 237 x 586,309 doubles it is ~1.1 GB, so rebuilding it per simulation would be pure waste.
 null_effect <- matrix(1, nrow = length(gene_object$genes), ncol = n_cells)
+
+# The unperturbed expected counts, on the same scale the simulation will draw on -- which is the
+# whole point of this step: the null model has to be fitted to counts of the kind it will later be
+# used to judge. Built once for the same reason null_effect is. pert_input() keeps every cell, in
+# the template's own order, so the template's covariate matrix is already aligned to this object.
+baseline <- baseline_expression(gene_object, template@covariate_matrix,
+                                model = opts$expression_model)
 
 precomputations <- vector("list", opts$reps)
 rep_ids <- integer(opts$reps)
@@ -169,7 +187,7 @@ for (rep_local in seq_len(opts$reps)) {
   # target or effect size. NULL_FIT_TARGET_KEY keeps this stream disjoint from every target's stream.
   set.seed(derive_seed(opts$seed, NULL_FIT_TARGET_KEY, rep_id, 0))
 
-  counts <- draw_counts(gene_object, null_effect)
+  counts <- draw_counts(gene_object, null_effect, baseline)
 
   obj <- null_template
   obj@response_matrix <- list(as_sceptre_response_matrix(counts, report_density = FALSE))
