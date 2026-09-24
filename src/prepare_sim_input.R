@@ -405,11 +405,15 @@ threshold <- tryCatch(discovery_threshold(so), error = function(e) {
            ") -- compute_power.R will need --alpha.")
   NA_real_
 })
+# Always written, as "NA" when there is no threshold. PREPARE_SIM_INPUT declares the file as an
+# output, so skipping it failed the task at step 1, before --alpha (the documented remedy) could ever
+# reach compute_power.R. With the file present, --alpha replaces it downstream, and without --alpha
+# compute_power.R stops on the NA and says to pass one.
 if (!is.na(threshold)) {
   log_step(sprintf("Discovery p-value threshold: %.6g (largest significant nominal p-value)",
                    threshold))
-  writeLines(format(threshold, digits = 17), out_threshold)
 }
+writeLines(if (is.na(threshold)) "NA" else format(threshold, digits = 17), out_threshold)
 log_resources("write outputs", started)
 
 report_size <- function(path) {

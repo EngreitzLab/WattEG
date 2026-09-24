@@ -67,5 +67,7 @@ conf_level: 0.95
 
 # Optional, unset by default.
 # alpha: 0.05                 # p-value threshold; otherwise derived from the sceptre object
-# n_control_cells: 5000       # sample controls rather than using all; costs 21-60% of power
-# cell_batches: batch_factor  # covariate to stratify control sampling by
+#
+# n_control_cells and cell_batches are NOT accepted by the pipeline: setting either stops the run
+# at startup. Sampling controls costs 21-60% of power (docs/methods.md); to experiment with it, call
+# src/run_power_simulation.R by hand.

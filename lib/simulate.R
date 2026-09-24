@@ -353,7 +353,8 @@ create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect
 #'
 #' For each gene the result is pmax(v + c, 0), where v are the perturbed cells' (already clamped)
 #' effects and c is the one constant that puts the mean exactly on the target. Where nothing would
-#' clamp -- every realistic case up to es 0.5 -- that is a plain shift, c = target - mean(v). At
+#' clamp -- every realistic case up to es 0.5 -- that is the plain shift c = target - mean(v), to a
+#' few ulps. At
 #' strong knockdowns a shift down pushes some cells below zero, so c is solved exactly rather than
 #' approached: see pin_to_mean(). An earlier version shifted, clamped and repeated; that converges
 #' only linearly once most cells clamp, and at es >= ~0.99 ran out of iterations and stopped a task
@@ -363,6 +364,9 @@ create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect
 #' nothing to centre for them; this checks it rather than assuming it.
 center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_sizes,
                                       tol = 1e-12) {
+  # The check is for real failures (NaN, a logic error), not rounding, so its tolerance grows with
+  # the number of perturbed cells the way summation error does. The mean is taken with mean(), which
+  # is compensated, not rowMeans(), which on platforms without long double accumulates n * eps.
   if (length(pert_status) != ncol(effect_size_mat)) {
     stop("pert_status has ", length(pert_status), " entries but the effect-size matrix has ",
          ncol(effect_size_mat), " cells.", call. = FALSE)
@@ -379,8 +383,9 @@ center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_
     for (g in seq_len(nrow(pert))) {
       pert[g, ] <- pin_to_mean(pert[g, ], gene_effect_sizes[[g]])
     }
-    gap <- gene_effect_sizes - rowMeans(pert)
-    if (any(!is.finite(gap)) || any(abs(gap) >= tol)) {
+    gap <- gene_effect_sizes - apply(pert, 1, mean)
+    allowed <- max(tol, 4 * ncol(pert) * .Machine$double.eps)
+    if (any(!is.finite(gap)) || any(abs(gap) >= allowed)) {
       stop("Could not pin the realised mean effect to the requested one (largest miss ",
            signif(max(abs(gap)), 3), ").", call. = FALSE)
     }
@@ -395,14 +400,23 @@ center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_
 #' each value hits zero; for any target > 0 it has a root. Sorting v in decreasing order, if exactly
 #' the top j values stay positive then f(c) = (sum of those j + j * c) / n, so c = (n * target -
 #' sum) / j. The right j is the largest one whose kink, f(-s_j), is still at or below the target.
-#' One sort, no iteration, exact to rounding.
+#'
+#' The closed form carries the rounding of a long cumulative sum, and perturbed-cell effects are
+#' heavily tied (each cell takes one of a few guide values), so that error adds up rather than
+#' cancelling: at tens of thousands of cells it reached ~1e-12. One correction step on the linear
+#' piece the solution lies on, using the compensated mean(), removes it.
 pin_to_mean <- function(v, target) {
   n <- length(v)
   s <- sort(v, decreasing = TRUE)
   cs <- cumsum(s)
   f_at_kink <- (cs - seq_len(n) * s) / n    # f(-s_j): the mean when the j-th largest just hits 0
   j <- max(which(f_at_kink <= target))      # f(-s_1) = 0, so j >= 1 whenever target >= 0
-  pmax(v + (n * target - cs[j]) / j, 0)
+  out <- pmax(v + (n * target - cs[j]) / j, 0)
+  pos <- which(out > 0)   # which(), not a logical mask: a NaN input must reach the caller's check
+  if (length(pos) > 0) {
+    out[pos] <- pmax(out[pos] + (target - mean(out)) * n / length(pos), 0)
+  }
+  out
 }
 
 #' One replicate's effect-size matrix, in cell order, pinned to the requested effect.
