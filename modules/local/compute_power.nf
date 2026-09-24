@@ -17,13 +17,19 @@ process COMPUTE_POWER {
     input:
     // One consolidated Parquet per effect size, from CONSOLIDATE_REPLICATES. Was 1,000 staged
     // TSVs; the file list below is kept general so an older sweep's TSVs still work.
-    tuple val(meta), val(effect_size), path(simulations, stageAs: 'sim/*')
-    tuple val(meta2), path(threshold)
+    //
+    // The threshold rides in the same tuple, joined on meta in main.nf. It used to arrive as a second
+    // channel built with `.first()`, so in a multi-sample run every sample was scored against one
+    // sample's discovery threshold.
+    tuple val(meta), val(effect_size), path(simulations, stageAs: 'sim/*'), path(threshold)
 
     output:
     tuple val(meta), val(effect_size), path("power_es${effect_size}.tsv"), emit: power
 
     script:
+    // params.alpha replaces the screen's own discovery threshold; compute_power.R takes exactly one
+    // of the two. It used to be passed to prepare_sim_input.R, which does not declare it.
+    def threshold_arg = params.alpha ? "--alpha ${params.alpha}" : "--threshold-file ${threshold}"
     """
     # A comma-separated list rather than a glob: compute_power.R accepts either, but an explicit
     # list is a single token and its ordering is stable.
@@ -36,7 +42,7 @@ process COMPUTE_POWER {
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         Rscript ${projectDir}/src/compute_power.R \\
             --simulations "\${sim_list}" \\
-            --threshold-file ${threshold} \\
+            ${threshold_arg} \\
             --conf-level ${params.conf_level} \\
             --out power_es${effect_size}.tsv
     """

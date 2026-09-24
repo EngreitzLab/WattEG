@@ -30,7 +30,7 @@ process PREPARE_SIM_INPUT {
     def response_odm_flag = response_odm ? "--response-odm ${response_odm}" : ''
     // --n-control-cells, --cell-batches and --alpha used to be passed here. prepare_sim_input.R
     // declares none of them, so setting any of those params made this step die on an optparse
-    // error. They belong to run_power_simulation.R and compute_power.R respectively.
+    // error. alpha now goes to COMPUTE_POWER; the pipeline refuses the other two (see main.nf).
     """
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         Rscript ${projectDir}/src/prepare_sim_input.R \\

@@ -67,6 +67,15 @@ workflow {
               "pixi environment baked in -- see conf/gcb.config)."
     }
 
+    // Sampled control cells are not wired through the pipeline: the path was never reachable from
+    // it (prepare_sim_input.R does not declare these flags, and passing them there crashed the
+    // step), it diverges from the all-cells path in ways that were never validated, and sampling
+    // controls costs 21-60% of power (docs/methods.md). Refuse rather than silently ignore.
+    if (params.n_control_cells || params.cell_batches) {
+        error "n_control_cells / cell_batches are not supported by the pipeline. Leave them unset; " +
+              "to experiment, call src/run_power_simulation.R by hand (see docs/methods.md)."
+    }
+
     // ---- inputs ---------------------------------------------------------------------------
     //
     // Samplesheet paths are resolved against the repository root, not the launch directory. The
@@ -205,8 +214,11 @@ workflow {
     // failed consolidation loses nothing.
     CONSOLIDATE_REPLICATES(ch_by_es)
 
-    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet.map { meta, es, f -> [meta, es, [f]] },
-                  PREPARE_SIM_INPUT.out.threshold.first())
+    // Each sample's own threshold, joined on the meta key -- not `.first()`, which scored every
+    // sample of a multi-sample run against whichever sample's threshold arrived first.
+    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet
+                      .map { meta, es, f -> [meta, es, [f]] }
+                      .combine(PREPARE_SIM_INPUT.out.threshold, by: 0))
 
     // ---- step 6: one row per pair across every effect size ---------------------------------
     ch_all_power = COMPUTE_POWER.out.power
