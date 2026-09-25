@@ -129,8 +129,23 @@ def _map_units(units: list, workers: int, prepared: Path, settings: dict) -> lis
             initializer=_init_spawned,
             initargs=(prepared, settings),
         )
-    with pool:
-        return list(pool.map(_run_unit, units))
+    # A worker that dies (the out-of-memory killer, or a crash as the pool starts) breaks the
+    # whole pool. Python would then exit 1, which the pipeline reads as "our code is wrong, stop the
+    # run" -- one bad machine would end a sweep. Exit 137 instead: the pipeline retries it, with
+    # double the memory, which is right for the common cause and harmless for the rest. First seen
+    # 2026-09-25 on 1 of 200 moi5 cis tasks, 26 s into the task.
+    from concurrent.futures.process import BrokenProcessPool
+
+    try:
+        with pool:
+            return list(pool.map(_run_unit, units))
+    except BrokenProcessPool:
+        print(
+            "ERROR: a worker process was killed (most often out of memory). Exiting 137 so the "
+            "task is retried with more memory.",
+            file=sys.stderr,
+        )
+        raise SystemExit(137) from None
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -38,6 +38,11 @@ process POWER_SIMULATION {
     // is attributable.
     out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv.gz"
     """
+    # One thread per worker. The task's parallelism is its --n-jobs worker processes; a BLAS or
+    # OpenMP thread pool in the parent when it forks them is oversubscription at best and a known
+    # cause of crashed children at worst.
+    export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         watteg-run-power-simulation \\
             --prepared . \\
