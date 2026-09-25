@@ -25,6 +25,7 @@ reuse.
 from __future__ import annotations
 
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -42,6 +43,51 @@ DEFAULT_GUIDE_SPREAD_C = 0.65
 # same set, drawn once from the run's seed -- what the owner chose on 2026-09-25, and close to what
 # sceptre does: its sampler reseeds mt19937(4) on every call, so R's replicates share one fixed set.
 PERMUTATION_MODES = ("per-replicate", "per-target")
+
+# How the permutation nulls are computed. Results are identical either way; only speed differs.
+# "scan" is pysceptre's default for permutations: PermutationPrefixSums gathers a (B, n_trt, 14)
+# array and takes a running sum over it, to serve many targets of different sizes from one set of
+# draws. WattEG's calls hold ONE target, so the running sum is thrown away but for one column
+# (227 MB at stage 2, n_trt = 406). "sparse" is pysceptre's own draw-matrix route, which it already
+# takes whenever the scan would be too large: a sparse indicator matrix times the gene's pieces.
+# Measured 2026-09-25 (docs/pysceptre-backend.md, section 13, item 3a): 119.5 -> 17.7 ms per
+# escalated pair at stage 2, 12.4 -> 1.9 ms at stage 1, 2.1x on cis and 2.3x on trans overall,
+# with p-values, z-statistics and stages identical on 3,750 pair-tests.
+NULL_ROUTES = ("sparse", "scan")
+
+
+def _decline_scan(self, lo, hi, n_trt):
+    """Stand-in for PermutationPrefixSums.statistics: always decline.
+
+    pysceptre's documented contract for this method is that None means "too large to scan, use
+    the draw matrix instead" (score_stat.py), so returning None selects its own sparse route
+    without changing its source.
+    """
+    return None
+
+
+@contextmanager
+def null_route(route: str):
+    """Compute the permutation nulls by `route` for the duration of the block."""
+    if route not in NULL_ROUTES:
+        raise ValueError(f"null route must be one of {NULL_ROUTES}, got {route!r}")
+    if route == "scan":
+        yield
+        return
+    from pysceptre.test_statistic import score_stat
+
+    cls = getattr(score_stat, "PermutationPrefixSums", None)
+    if cls is None or not hasattr(cls, "statistics"):
+        raise RuntimeError(
+            "pysceptre no longer has PermutationPrefixSums.statistics, so the sparse null route "
+            "cannot be selected; check the pysceptre pin, or run with the scan route"
+        )
+    original = cls.statistics
+    cls.statistics = _decline_scan
+    try:
+        yield
+    finally:
+        cls.statistics = original
 
 
 @dataclass(frozen=True)
@@ -98,6 +144,7 @@ def simulate_target(
     n_jobs: int = 8,
     expression_model: str = "fitted",
     permutations: str = "per-replicate",
+    nulls: str = "scan",
 ) -> pd.DataFrame | None:
     """Simulate and test one target, returning one row per (pair, replicate).
 
@@ -162,30 +209,31 @@ def simulate_target(
         counts = draw_counts(
             baseline, effect_size_matrix(assignment, wanted, guide_spread_c, rng), theta, rng
         )
-        result = run_discovery_ntcells_complement(
-            counts,
-            genes,
-            sim.covariate_matrix,
-            {target: treated},
-            pairs,
-            B1=params.B1,
-            B2=params.B2,
-            B3=params.B3,
-            side_code=params.side_code,
-            resampling_mechanism=params.resampling_mechanism,
-            seed=(
-                target_permutation_seed
-                if target_permutation_seed is not None
-                else int(rng.integers(0, 2**31 - 1))
-            ),
-            n_jobs=n_jobs,
-            # Stated rather than left to be discovered. Each call carries exactly one target, so
-            # the default of 200 is reduced to 1 by the memory budget every single time -- and
-            # that reduction warns, six lines per call, which is 21,600 lines for a 36-target
-            # 100-replicate run. Saying 1 here is not a tuning choice: it is what the value
-            # already was. Chunk size affects only batching width, never a result.
-            target_chunk_size=1,
-        )
+        with null_route(nulls):
+            result = run_discovery_ntcells_complement(
+                counts,
+                genes,
+                sim.covariate_matrix,
+                {target: treated},
+                pairs,
+                B1=params.B1,
+                B2=params.B2,
+                B3=params.B3,
+                side_code=params.side_code,
+                resampling_mechanism=params.resampling_mechanism,
+                seed=(
+                    target_permutation_seed
+                    if target_permutation_seed is not None
+                    else int(rng.integers(0, 2**31 - 1))
+                ),
+                n_jobs=n_jobs,
+                # Stated rather than left to be discovered. Each call carries exactly one target, so
+                # the default of 200 is reduced to 1 by the memory budget every single time -- and
+                # that reduction warns, six lines per call, which is 21,600 lines for a 36-target
+                # 100-replicate run. Saying 1 here is not a tuning choice: it is what the value
+                # already was. Chunk size affects only batching width, never a result.
+                target_chunk_size=1,
+            )
         result = result.assign(rep=rep, effect_size=effect_size, num_pert_cells=n_perturbed)
         out.append(result)
 

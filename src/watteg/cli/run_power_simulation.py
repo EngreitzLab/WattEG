@@ -25,6 +25,7 @@ import pandas as pd
 
 from watteg.engine import (
     DEFAULT_GUIDE_SPREAD_C,
+    NULL_ROUTES,
     PERMUTATION_MODES,
     AnalysisParams,
     simulate_target,
@@ -82,6 +83,7 @@ def _run_unit(unit: tuple) -> tuple:
         n_jobs=1,
         expression_model=shared["expression_model"],
         permutations=shared["permutations"],
+        nulls=shared["nulls"],
     )
     return target, frame, time.perf_counter() - at
 
@@ -213,6 +215,14 @@ def main(argv: list[str] | None = None) -> int:
         "replicate [default %(default)s]. The simulated counts are the same either way",
     )
     parser.add_argument(
+        "--nulls",
+        choices=NULL_ROUTES,
+        default="scan",
+        help="how the permutation nulls are computed: 'sparse' is pysceptre's draw-matrix route, "
+        "about twice as fast for one-target calls; 'scan' is its default. The results are "
+        "identical [default %(default)s]",
+    )
+    parser.add_argument(
         "--expression-model",
         choices=("fitted", "size_factor"),
         default="fitted",
@@ -261,6 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(genes_of)} targets / {len(split)} pairs, replicates {reps.start}-{reps.stop - 1}, "
         f"effect size {args.effect_size} (relative expression {1 - args.effect_size:g})\n"
         f"  baseline: {args.expression_model}, permutations {args.permutations}, "
+        f"nulls {args.nulls}, "
         f"n_jobs {args.n_jobs}, "
         f"B1/B2/B3 {params.B1}/{params.B2}/{params.B3}, side_code {params.side_code}"
     )
@@ -281,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
         guide_spread_c=args.guide_spread_c,
         expression_model=args.expression_model,
         permutations=args.permutations,
+        nulls=args.nulls,
     )
     _SHARED.update(sim=sim, params=params, grna_csc=sim.grna_perts.tocsc(), **settings)
     units = [(t, list(g), guides_of[t], r) for t, g in genes_of.items() for r in reps]

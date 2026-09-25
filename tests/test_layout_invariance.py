@@ -47,6 +47,7 @@ def simulate(
     seed: int = 7,
     n_jobs: int = 1,
     permutations: str = "per-replicate",
+    nulls: str = "scan",
 ):
     subprocess.run(
         [
@@ -69,6 +70,8 @@ def simulate(
             str(n_jobs),
             "--permutations",
             permutations,
+            "--nulls",
+            nulls,
             "--out",
             str(out),
         ],
@@ -159,3 +162,17 @@ def test_per_target_permutations_are_invariant_to_chunking_and_workers(prepared,
     )
     two = pd.concat([first, second]).sort_values(KEY).reset_index(drop=True)
     assert one.sort_values(KEY).reset_index(drop=True).equals(two)
+
+
+@pytest.mark.parametrize("permutations", ["per-replicate", "per-target"])
+def test_sparse_and_scan_nulls_give_identical_output(prepared, split, tmp_path, permutations):
+    """The sparse null route is a speed change only: byte-identical output to the scan route.
+
+    It holds only while pysceptre's two routes compute the same segment sums, so this is also the
+    test that catches a pysceptre update breaking that assumption.
+    """
+    scan = tmp_path / "scan.tsv"
+    sparse = tmp_path / "sparse.tsv"
+    simulate(prepared, scan, split, reps=4, offset=0, permutations=permutations, nulls="scan")
+    simulate(prepared, sparse, split, reps=4, offset=0, permutations=permutations, nulls="sparse")
+    assert scan.read_bytes() == sparse.read_bytes()
