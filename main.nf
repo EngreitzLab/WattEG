@@ -50,6 +50,12 @@ workflow {
     // ---- parameter checks -----------------------------------------------------------------
     //
     // Cheap to check here, expensive to discover 40 minutes into a 1,000-task run.
+    // guide_sd was an absolute spread (0.13). Its replacement, guide_spread_c, is a coefficient on
+    // es * (1 - es), so reading an old 0.13 as c would shrink the spread fivefold. Refuse it.
+    if (params.guide_sd != null) {
+        error "guide_sd was replaced by guide_spread_c (default 0.65) on 2026-09-25; the spread is " +
+              "now c * es * (1 - es), not an absolute sd. Remove guide_sd from the params."
+    }
     if (!params.effect_sizes || params.effect_sizes.size() == 0) {
         error "effect_sizes is empty -- nothing to simulate."
     }

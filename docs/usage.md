@@ -140,7 +140,7 @@ watteg-run-power-simulation \
 | `--reps` | required | Replicates in this chunk. |
 | `--rep-offset` | 0 | Replicates already covered by earlier chunks, so `rep` stays unique. |
 | `--seed` | required | Results are stochastic and must be reproducible. |
-| `--guide-sd` | 0.13 | Across-gRNA spread of the effect size. |
+| `--guide-spread-c` | 0.65 | Guide-to-guide spread: each guide's knockdown is Beta with mean es and sd c·es·(1−es), so zero at es = 0. Replaces `--guide-sd`, which is refused. See [Methods](methods.md). |
 | `--n-jobs` | 8 | Workers for the per-gene tests. |
 | `--expression-model` | `fitted` | Where a gene's unperturbed expected counts come from. |
 

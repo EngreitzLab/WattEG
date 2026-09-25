@@ -37,8 +37,10 @@ effect_sizes:
 # docs/choosing-num-replicates.md.
 num_replicates: 100
 
-# Spread of per-gRNA effect sizes around the target effect size.
-guide_sd: 0.13
+# Guide-to-guide spread among a target's own guides: each guide's knockdown is Beta with mean
+# es and sd c * es * (1 - es), so it vanishes at es = 0. 0.65 is fitted to per-guide data from
+# three CRISPRi screens (docs/methods.md). Replaces guide_sd, which the pipeline now refuses.
+guide_spread_c: 0.65
 
 # Parallelisation only; does not affect results. Seeds derive from
 # (seed, target, rep, effect_size), so output is invariant to the split layout.

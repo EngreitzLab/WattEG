@@ -36,7 +36,7 @@ from .perturbation import effect_size_matrix, guide_assignment, target_cells
 from .seeds import SETUP_REP, rng_for
 from .simulate import draw_counts
 
-DEFAULT_GUIDE_SD = 0.13
+DEFAULT_GUIDE_SPREAD_C = 0.65
 
 
 @dataclass(frozen=True)
@@ -89,7 +89,7 @@ def simulate_target(
     seed: int,
     params: AnalysisParams,
     grna_csc,
-    guide_sd: float = DEFAULT_GUIDE_SD,
+    guide_spread_c: float = DEFAULT_GUIDE_SPREAD_C,
     n_jobs: int = 8,
     expression_model: str = "fitted",
 ) -> pd.DataFrame | None:
@@ -143,7 +143,7 @@ def simulate_target(
     for rep in reps:
         rng = rng_for(seed, target, rep, effect_size)
         counts = draw_counts(
-            baseline, effect_size_matrix(assignment, wanted, guide_sd, rng), theta, rng
+            baseline, effect_size_matrix(assignment, wanted, guide_spread_c, rng), theta, rng
         )
         result = run_discovery_ntcells_complement(
             counts,

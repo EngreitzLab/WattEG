@@ -108,7 +108,7 @@ pixi_run Rscript src/run_power_simulation.R \
   --pairs "${first_split}" \
   --grna-targets "${WORK}/prepared/grna_targets.tsv" \
   --null-precomputations "${WORK}/null_precomputations.rds" \
-  --effect-size 0.5 --reps 2 --rep-offset 0 --guide-sd 0.13 --seed 1 \
+  --effect-size 0.5 --reps 2 --rep-offset 0 --guide-spread-c 0.65 --seed 1 \
   --out "${WORK}/sim.tsv"
 
 echo

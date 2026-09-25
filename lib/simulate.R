@@ -13,7 +13,9 @@
 ##     replicate (power at a fixed element effect). The original meant to, but centred before
 ##     reordering and so shifted the wrong columns;
 ##   - guides that belong to anything else have an effect of exactly 1; the original gave them
-##     N(1, guide_sd), which double-counted noise already in the fitted dispersion.
+##     N(1, 0.13), which double-counted noise already in the fitted dispersion;
+##   - a target's guides have a spread that vanishes at no effect (Beta, sd c * es * (1 - es));
+##     the original's absolute N(1 - es, 0.13) kept it at 13% even for a null element.
 ## Each of these changes the RNG stream, so no seed reproduces the original draw for draw.
 
 suppressPackageStartupMessages(library(Matrix))
@@ -310,30 +312,51 @@ create_guide_pert_status <- function(pert_status, grna_perts, pert_guides) {
   status
 }
 
+#' One gene's guide effects: each of the target's n guides gets its own relative expression.
+#'
+#' A guide's knockdown is drawn from a Beta distribution with mean es = 1 - rel and standard
+#' deviation guide_spread_c * es * (1 - es) (decided 2026-09-25; docs/methods.md). The spread is
+#' therefore zero at es = 0, proportional to es for small effects and levelling off as knockdown
+#' saturates, which is what per-guide data from three CRISPRi screens show (DC-TAP K562, DC-TAP
+#' WTC11, and moi5 itself). Every draw lies strictly inside (0, 1), so nothing clamps.
+#'
+#' It replaces an absolute N(1 - es, 0.13) draw, inherited from the original code, whose spread did
+#' not vanish at es = 0: a target with no effect still had guides moving expression +/-13%, which
+#' pushed the false-call rate of highly expressed genes above nominal (up to 41x at the discovery
+#' threshold on moi5 trans). c = 0.65 is fitted to those per-guide data; it reproduces the old 0.13
+#' at es ~0.28. guide_spread_c = 0 gives every guide exactly rel (no spread).
+draw_guide_effects <- function(rel, n, guide_spread_c) {
+  es <- 1 - rel
+  if (es <= 0) return(rep(1, n))
+  if (guide_spread_c == 0) return(rep(rel, n))
+  nu <- 1 / (guide_spread_c^2 * es * (1 - es)) - 1
+  rbeta(n, (1 - es) * nu, es * nu)
+}
+
 #' Effect-size matrix with guide-to-guide variability among the target's guides.
 #'
-#' Each of the target's guides draws its own effect size around the requested relative expression,
-#' with standard deviation guide_sd, independently for every gene; negative draws clamp to 0.
+#' Each of the target's guides draws its own effect size (draw_guide_effects()), independently for
+#' every gene.
 #'
 #' Every other guide has an effect of exactly 1. Those guides belong to other elements, or are
 #' non-targeting, and have no business moving this gene. The dispersion the counts are drawn with
 #' was fitted to real cells that already carry their real guides, so it already contains whatever
-#' those guides do. Drawing an extra N(1, guide_sd) multiplier for them -- as every version did
+#' those guides do. Drawing an extra N(1, 0.13) multiplier for them -- as every version did
 #' until 2026-09-24, going back to the original DC-TAP code -- counted that noise twice: a gene
 #' with theta 146 came back from its own simulated null data with theta 42, and power was
 #' understated for highly expressed, low-dispersion genes.
-create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect_sizes, guide_sd) {
+create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect_sizes,
+                                      guide_spread_c) {
   n_pert_guides <- length(pert_guides)
   n_ctrl_guides <- max(0L, max(grna_pert_status) - n_pert_guides)
   n_genes <- length(gene_effect_sizes)
 
   # matrix() because vapply() returns a plain vector when there is a single guide.
   guide_effect_sizes_pert <- matrix(
-    vapply(gene_effect_sizes, FUN = rnorm, n = n_pert_guides, sd = guide_sd,
-           FUN.VALUE = numeric(n_pert_guides)),
+    vapply(gene_effect_sizes, FUN = draw_guide_effects, n = n_pert_guides,
+           guide_spread_c = guide_spread_c, FUN.VALUE = numeric(n_pert_guides)),
     nrow = n_pert_guides, ncol = n_genes
   )
-  guide_effect_sizes_pert[guide_effect_sizes_pert < 0] <- 0
   guide_effect_sizes_ctrl <- matrix(1, nrow = n_ctrl_guides, ncol = n_genes)
 
   # Row 1 is the no-effect row, used by cells carrying no guide.
@@ -431,9 +454,10 @@ pin_to_mean <- function(v, target) {
 #' @param restore_cell_order order(cell_order(pert_status)), computed once per target
 #' @return genes x cells, in cell order
 simulate_effect_sizes <- function(grna_pert_status, pert_status, restore_cell_order,
-                                  pert_guides, gene_effect_sizes, guide_sd) {
+                                  pert_guides, gene_effect_sizes, guide_spread_c) {
   es_mat <- create_effect_size_matrix(grna_pert_status, pert_guides = pert_guides,
-                                      gene_effect_sizes = gene_effect_sizes, guide_sd = guide_sd)
+                                      gene_effect_sizes = gene_effect_sizes,
+                                      guide_spread_c = guide_spread_c)
   es_mat <- es_mat[, restore_cell_order, drop = FALSE]
   center_effect_size_matrix(es_mat, pert_status = pert_status,
                             gene_effect_sizes = gene_effect_sizes)

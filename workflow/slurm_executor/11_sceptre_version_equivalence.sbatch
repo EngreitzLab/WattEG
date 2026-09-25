@@ -105,7 +105,7 @@ run_under() {
       --effect-size '${EFFECT_SIZE}' \
       --reps '${CHECK_REPS}' \
       --rep-offset 0 \
-      --guide-sd '${GUIDE_SD}' \
+      --guide-spread-c '${GUIDE_SPREAD_C}' \
       --seed '${SEED}' \
       --out '${out}' \
       --no-grna-precomp-reuse

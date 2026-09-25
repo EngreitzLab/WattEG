@@ -195,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     # number: since 2026-09-24 every guide outside the target has an effect of
     # exactly 1 (see watteg.perturbation), so a control cell comes out at 1
     # whether it points at a non-targeting guide or at the no-effect row. Until
-    # then those guides drew N(1, guide_sd), and dropping them would have
+    # then those guides drew N(1, 0.13), and dropping them would have
     # removed that spread from the control cells.
     guide_cells = dict(in_use.targeting_grna_cells)
     guide_cells.update(in_use.ntc_grna_cells or {})

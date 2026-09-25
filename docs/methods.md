@@ -23,8 +23,7 @@ cell-weighted mean. That is the effect sceptre's union test targets, since it po
 carrying any of the element's guides; power is a property of a test at a value of the parameter it
 targets. The match is close rather than exact: the test compares expected counts, which weight
 each cell by its own baseline, and the guides' spread around the pinned mean adds a little variance
-of its own. At effect size 0 that spread nudges the false-call rate slightly above nominal for
-highly expressed genes.
+of its own. That spread is zero at effect size 0 (next section), so the null is exact.
 
 This was decided on 2026-09-24, and it is written down here because it was never written down
 before, which cost several regenerations:
@@ -45,26 +44,52 @@ before, which cost several regenerations:
   wanted, it belongs in a separately labelled output with a multiplicative efficiency model.
 
 Two consequences to accept knowingly. WattEG does not reproduce the published DC-TAP per-pair power,
-which is the other quantity. And `guide_sd` barely moves power at effect sizes up to 0.5, because
-the guides' spread around a pinned mean adds little variance to what the test sees.
+which is the other quantity. And the guides' spread barely moves power at effect sizes up to 0.5,
+because spread around a pinned mean adds little variance to what the test sees: on moi5, no pair's
+power moves by more than 0.02 between the spread described below and no spread at all.
 
 ## Guide-to-guide variability
 
 Guides targeting the same element are not equally effective. Each of the target's gRNAs therefore
-gets its own effect size, drawn independently for every gene:
+gets its own knockdown, drawn independently for every gene:
 
 ```
-this target's guides:  N(1 - effect_size, guide_sd)
+this target's guides:  knockdown ~ Beta(mean = es, sd = c * es * (1 - es)),  effect = 1 - knockdown
 every other guide:     exactly 1
 ```
 
-with `guide_sd = 0.13` by default. Negative draws are clamped to 0, because a guide cannot produce
-negative expression.
+with `guide_spread_c` (c) = 0.65 by default. The spread is **zero at es = 0** (a null element's
+guides do nothing), grows in proportion to es for small effects, and levels off as knockdown
+saturates. Every draw lies strictly inside (0, 1), so nothing needs clamping. c = 0 means no spread.
+
+This form and value were settled on 2026-09-25 from per-guide data, replacing an absolute
+`N(1 - es, 0.13)` that the original code carried:
+
+- **The spread vanishes at no effect.** In three CRISPRi screens with ~15 designed guides per element
+  (DC-TAP K562, DC-TAP WTC11, and moi5, the screen WattEG simulates), the between-guide spread of
+  null pairs is 0.004-0.014 after removing sampling noise, the same floor as groups of
+  non-targeting guides. Fulco 2019's FlowFISH null elements say the same. The absolute 0.13 kept a
+  13% spread there. Around the pinned mean that inflated the false-call rate of highly expressed
+  genes: 3,032 moi5 trans pairs sat above twice the nominal rate at the discovery threshold, the
+  worst at 41 times.
+- **It grows with the effect, then levels off.** Enhancer spread is 0.015 / 0.056 / 0.105 / 0.144 /
+  0.108 at es 0.03 / 0.10 / 0.21 / 0.37 / 0.59. `c * es * (1 - es)` fits those bins at chi-square
+  6.6 on 4 df, against 128 for the absolute form and 69 for a constant coefficient of variation.
+- **c = 0.65 is fitted to those data** (0.645-0.648 in each screen separately). It reproduces the old
+  0.13 at es ~0.28. The 0.13 came from one 2022 notebook that pooled the within-element spread of
+  significant Fulco 2019 FlowFISH elements, without separating measurement noise and without asking
+  whether the spread depends on es. Anchoring the new form to 0.13 at es 0.15 instead (c = 1.02)
+  would change no moi5 pair's power by more than 0.05.
+- It is the guide-efficacy form the CRISPR screen literature uses (JACKS, MAGeCK-MLE, CRISPhieRmix,
+  Horlbeck 2016), where a guide's efficacy scales the element's effect.
+
+The parameter is `--guide-spread-c` / `guide_spread_c`. The old `--guide-sd` / `guide_sd` is
+refused, because reading an old 0.13 as c would shrink the spread fivefold.
 
 **Other guides have no effect on the tested genes.** Control cells carry guides that belong to
 other elements, or none at all, and those do not move this gene. The dispersion the counts are drawn
 with was fitted to real cells that already carry their real guides, so it already contains whatever
-those guides do. Every version until 2026-09-24 drew an extra `N(1, guide_sd)` for them, going back
+those guides do. Every version until 2026-09-24 drew an extra `N(1, 0.13)` for them, going back
 to the original DC-TAP code. That counted the noise twice: a gene with theta 146 came back from its
 own simulated null data with theta 42, and power was understated for highly expressed,
 low-dispersion genes.
@@ -72,9 +97,9 @@ low-dispersion genes.
 **The perturbed cells' mean is then pinned** to the requested relative expression, gene by gene: the
 perturbed block is shifted so its row mean equals `1 - effect_size` exactly. This step is what makes
 the effect *fixed* (previous section). It is not a correction for clamping, which is what this page
-used to say: at effect size 0.15 a guide clamps with probability about 3 × 10⁻¹¹. At strong
-knockdowns (effect size ≥ 0.7) a plain shift would push some guides below zero, so the shift is
-solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c` that puts the
+used to say. Because the draw's mean is already `1 - es`, the pin only removes one replicate's
+sampling wobble. At strong knockdowns a plain shift could push some guides below zero, so the shift
+is solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c` that puts the
 mean on the target, which always exists for an effect size below 1. (An earlier version shifted,
 clamped and repeated; once most cells clamp that converges slowly, and at effect size ≥ 0.99 it ran
 out of iterations and stopped the run on a pin that exists.)
@@ -82,8 +107,8 @@ out of iterations and stopped the run on a pin that exists.)
 A cell carrying no guide gets multiplier 1. A cell carrying several of the target's guides has one
 picked at random **once per target and effect size**, and it keeps that guide in every replicate.
 (This page used to say "per replicate", which no implementation ever did. The pick is seeded by the
-effect size as well as the target, so it can differ between effect sizes.) Only 0.18% of perturbed cells carry more than one of their target's
-guides on moi5, so the choice barely matters.
+effect size as well as the target, so it can differ between effect sizes.) Only 0.18% of perturbed
+cells carry more than one of their target's guides on moi5, so the choice barely matters.
 
 ## Simulating counts
 

@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from watteg.engine import DEFAULT_GUIDE_SD, AnalysisParams, simulate_target
+from watteg.engine import DEFAULT_GUIDE_SPREAD_C, AnalysisParams, simulate_target
 from watteg.sim_input import read_sim_input
 
 # What a reader needs, and nothing more. At 100 replicates x 34,886 pairs x six
@@ -76,12 +76,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
+        "--guide-spread-c",
+        type=float,
+        default=DEFAULT_GUIDE_SPREAD_C,
+        help="guide-to-guide spread among the target's own guides: each guide's knockdown is "
+        "Beta with mean --effect-size and sd c * es * (1 - es) [default %(default)s, fitted to "
+        "per-guide data from three CRISPRi screens]. Zero at es = 0; must be in [0, 2). The "
+        "guides' mean is pinned to --effect-size, so this adds no uncertainty about the "
+        "element's effect. Other guides have no effect",
+    )
+    parser.add_argument(
         "--guide-sd",
         type=float,
-        default=DEFAULT_GUIDE_SD,
-        help="spread of the effect size among the target's own guides [default %(default)s]. "
-        "The guides differ within a replicate, but their mean is pinned to --effect-size, so "
-        "this adds no uncertainty about the element's effect. Other guides have no effect",
+        default=None,
+        help="retired; use --guide-spread-c. Passing it is an error",
     )
     parser.add_argument(
         "--n-jobs", type=int, default=8, help="workers for the per-gene tests [default %(default)s]"
@@ -107,6 +115,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.reps < 1:
         raise SystemExit("--reps must be at least 1")
+    if args.guide_sd is not None:
+        raise SystemExit(
+            "--guide-sd was replaced by --guide-spread-c on 2026-09-25: the spread is now "
+            "c * es * (1 - es) (default 0.65), not an absolute sd. Passing the old 0.13 as c "
+            "would shrink it fivefold, so it is refused rather than reinterpreted."
+        )
+    if not 0.0 <= args.guide_spread_c < 2.0:
+        raise SystemExit(f"--guide-spread-c must be in [0, 2) (got {args.guide_spread_c})")
 
     started = time.perf_counter()
     sim = read_sim_input(args.prepared / "sim_input.h5")
@@ -146,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             params=params,
             grna_csc=grna_csc,
-            guide_sd=args.guide_sd,
+            guide_spread_c=args.guide_spread_c,
             n_jobs=args.n_jobs,
             expression_model=args.expression_model,
         )

@@ -15,7 +15,12 @@ import pandas as pd
 import pytest
 from scipy import sparse
 
-from watteg.perturbation import effect_size_matrix, guide_assignment, target_cells
+from watteg.perturbation import (
+    draw_guide_effects,
+    effect_size_matrix,
+    guide_assignment,
+    target_cells,
+)
 from watteg.seeds import derive_seed, rng_for
 from watteg.simulate import draw_counts
 
@@ -208,7 +213,7 @@ def test_the_realised_mean_is_pinned_and_control_cells_are_exactly_one(es):
     wanted = np.full(3, 1.0 - es)
     rng = np.random.default_rng(100)
     for _ in range(50):
-        m = effect_size_matrix(fx.assignment, wanted, guide_sd=0.13, rng=rng)
+        m = effect_size_matrix(fx.assignment, wanted, guide_spread_c=0.65, rng=rng)
         np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), wanted, rtol=0, atol=1e-12)
         assert (m[:, ~fx.is_perturbed] == 1.0).all()
 
@@ -216,14 +221,14 @@ def test_the_realised_mean_is_pinned_and_control_cells_are_exactly_one(es):
 def test_without_the_pin_the_realised_mean_would_wander():
     """What the pin removes. Drawing the same guide effects and applying them
     without pinning, the realised mean varies from replicate to replicate by
-    about guide_sd * sqrt(sum n_g^2) / sum n_g -- the other estimand, random
-    guide effects."""
+    about the guides' sd * sqrt(sum n_g^2) / sum n_g -- the other estimand,
+    random guide effects."""
     fx = fixture_assignment()
     status = fx.assignment.status[fx.is_perturbed]
     rng = np.random.default_rng(8)
     means = []
     for _ in range(200):
-        draws = np.clip(rng.normal(0.85, 0.13, size=fx.assignment.n_target_guides), 0.0, None)
+        draws = draw_guide_effects(np.array([0.85]), fx.assignment.n_target_guides, 0.65, rng)[:, 0]
         means.append(draws[status - 1].mean())
     assert np.std(means) > 0.01
 
@@ -243,7 +248,7 @@ def test_the_guide_status_is_each_cells_own_guide():
             assert s > n_t and fx.other_guides[s - n_t - 1] in carried, f"cell {j}"
 
     # Cells carrying the same guide get the same effect within a replicate.
-    m = effect_size_matrix(a, np.array([0.85]), guide_sd=0.13, rng=np.random.default_rng(13))
+    m = effect_size_matrix(a, np.array([0.85]), guide_spread_c=0.65, rng=np.random.default_rng(13))
     perturbed_status = a.status[fx.is_perturbed]
     values = m[0, fx.is_perturbed]
     for s in np.unique(perturbed_status):
@@ -253,14 +258,14 @@ def test_the_guide_status_is_each_cells_own_guide():
 def test_pinning_the_mean_keeps_the_guide_to_guide_spread():
     """The pin adds one constant per gene; it must not flatten the guides. With
     n_g perturbed cells on guide g and N in total, the expected within-replicate
-    variance is guide_sd^2 * (1 - sum n_g^2 / N^2)."""
+    variance is sd^2 * (1 - sum n_g^2 / N^2), with sd = c * es * (1 - es)."""
     fx = fixture_assignment()
     status = fx.assignment.status[fx.is_perturbed]
     n_g = np.bincount(status, minlength=fx.assignment.n_target_guides + 1)[1:]
-    expected = 0.13**2 * (1 - (n_g**2).sum() / n_g.sum() ** 2)
+    expected = (0.65 * 0.15 * 0.85) ** 2 * (1 - (n_g**2).sum() / n_g.sum() ** 2)
     rng = np.random.default_rng(9)
     within = [
-        effect_size_matrix(fx.assignment, np.array([0.85]), guide_sd=0.13, rng=rng)[
+        effect_size_matrix(fx.assignment, np.array([0.85]), guide_spread_c=0.65, rng=rng)[
             0, fx.is_perturbed
         ].var()
         for _ in range(400)
@@ -278,7 +283,7 @@ def test_no_control_cell_indexes_a_targeting_row_even_when_the_last_target_guide
     assert ((control_status == 0) | (control_status > fx.assignment.n_target_guides)).all()
 
     m = effect_size_matrix(
-        fx.assignment, np.array([0.5]), guide_sd=0.0, rng=np.random.default_rng(0)
+        fx.assignment, np.array([0.5]), guide_spread_c=0.0, rng=np.random.default_rng(0)
     )
     assert (m[0, fx.is_perturbed] == 0.5).all()
     assert (m[0, ~fx.is_perturbed] == 1.0).all()
@@ -293,7 +298,7 @@ def test_strong_knockdowns_are_pinned_exactly(es):
     wanted = np.full(2, 1.0 - es)
     rng = np.random.default_rng(11)
     for _ in range(200):
-        m = effect_size_matrix(fx.assignment, wanted, guide_sd=0.13, rng=rng)
+        m = effect_size_matrix(fx.assignment, wanted, guide_spread_c=0.65, rng=rng)
         assert (m >= 0).all()
         np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), wanted, rtol=0, atol=1e-12)
 
@@ -354,28 +359,40 @@ def test_a_non_finite_effect_is_a_loud_error():
     )
 
     class NaNDraw:
-        def normal(self, loc, scale, size):
+        def beta(self, a, b, size):
             return np.full(size, np.nan)
 
     with pytest.raises(ValueError, match="could not pin"):
-        effect_size_matrix(a, np.array([0.8]), guide_sd=0.13, rng=NaNDraw())
+        effect_size_matrix(a, np.array([0.8]), guide_spread_c=0.65, rng=NaNDraw())
 
 
-def test_at_effect_size_zero_the_mean_is_exactly_one_and_the_guides_still_differ():
+def test_at_effect_size_zero_every_effect_is_exactly_one():
+    """A null element's guides do nothing. The old absolute N(1 - es, 0.13) kept
+    a 13% spread here, which inflated false calls for highly expressed genes."""
     fx = fixture_assignment()
     m = effect_size_matrix(
-        fx.assignment, np.array([1.0, 1.0]), guide_sd=0.13, rng=np.random.default_rng(22)
+        fx.assignment, np.array([1.0, 1.0]), guide_spread_c=0.65, rng=np.random.default_rng(22)
     )
-    np.testing.assert_allclose(m[:, fx.is_perturbed].mean(axis=1), 1.0, rtol=0, atol=1e-12)
-    assert (m[:, ~fx.is_perturbed] == 1.0).all()
-    assert m[0, fx.is_perturbed].std() > 0.05
+    assert (m == 1.0).all()
+
+
+def test_the_guide_draw_has_the_documented_moments_and_c_zero_means_no_spread():
+    """sd = c * es * (1 - es), mean = 1 - es; bounded in (0, 1)."""
+    rng = np.random.default_rng(25)
+    for es in (0.05, 0.15, 0.5):
+        x = draw_guide_effects(np.array([1.0 - es]), 400_000, 0.65, rng)[:, 0]
+        assert ((x > 0) & (x < 1)).all()
+        assert x.mean() == pytest.approx(1.0 - es, abs=2e-3)
+        assert x.std() == pytest.approx(0.65 * es * (1.0 - es), rel=1e-2)
+    np.testing.assert_array_equal(draw_guide_effects(np.array([0.85]), 5, 0.0, rng), 0.85)
+    np.testing.assert_array_equal(draw_guide_effects(np.array([1.0]), 5, 0.65, rng), 1.0)
 
 
 def test_each_gene_draws_its_own_guide_effects():
     """One draw shared across genes would make every tested gene of a target move together."""
     fx = fixture_assignment()
     m = effect_size_matrix(
-        fx.assignment, np.full(3, 0.85), guide_sd=0.13, rng=np.random.default_rng(23)
+        fx.assignment, np.full(3, 0.85), guide_spread_c=0.65, rng=np.random.default_rng(23)
     )
     values = m[:, fx.is_perturbed]
     assert not np.allclose(values[0], values[1])
@@ -416,7 +433,7 @@ def test_effect_sizes_never_go_negative():
         {"status": status, "is_perturbed": is_pert, "n_target_guides": 1, "n_other_guides": 1},
     )()
     # A near-zero target with a wide spread is where clamping actually bites.
-    matrix = effect_size_matrix(a, np.array([0.02]), guide_sd=0.5, rng=rng)
+    matrix = effect_size_matrix(a, np.array([0.02]), guide_spread_c=0.5, rng=rng)
     assert (matrix >= 0).all()
 
 

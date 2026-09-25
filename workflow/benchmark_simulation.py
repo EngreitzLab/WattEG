@@ -104,7 +104,7 @@ def simulate_replicates(sim, target, genes, target_guides, effect_size, reps, se
     for rep in range(1, reps + 1):
         rng = rng_for(seed, target, rep, effect_size)
         with timed("1. draw counts"):
-            es = effect_size_matrix(assignment, wanted, guide_sd=0.13, rng=rng)
+            es = effect_size_matrix(assignment, wanted, guide_spread_c=0.65, rng=rng)
             blocks.append(draw_counts(baseline, es, theta, rng))
     return np.vstack(blocks), is_perturbed
 

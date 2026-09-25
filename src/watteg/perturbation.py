@@ -15,7 +15,7 @@ carries a guide for some other element, or a non-targeting one, and that guide
 does not move this gene: its effect is exactly 1. The dispersion the counts are
 drawn with was fitted to real cells that already carry their real guides, so
 it already contains whatever those guides do. Until 2026-09-24 every other
-guide drew an extra N(1, guide_sd), as in the original DC-TAP code. That
+guide drew an extra N(1, 0.13), as in the original DC-TAP code. That
 counted the noise twice (theta 146 refit to 42 on a gene's own simulated null
 data) and understated power for highly expressed, low-dispersion genes.
 
@@ -161,6 +161,32 @@ def guide_assignment(
     )
 
 
+def draw_guide_effects(
+    relative_expression: np.ndarray, n_guides: int, guide_spread_c: float, rng
+) -> np.ndarray:
+    """(n_guides x genes) relative expression, one draw per guide per gene.
+
+    Each guide's knockdown is Beta with mean es = 1 - relative expression and sd
+    guide_spread_c * es * (1 - es) (decided 2026-09-25; docs/methods.md). The
+    spread is zero at es = 0, proportional to es for small effects and levels
+    off as knockdown saturates, which is what per-guide data from three CRISPRi
+    screens show. Every draw lies inside (0, 1), so nothing clamps. It replaces
+    an absolute N(1 - es, 0.13), whose spread did not vanish at es = 0 and
+    inflated the false-call rate of highly expressed genes. guide_spread_c = 0
+    gives every guide exactly the requested relative expression. Same draw as
+    R's `draw_guide_effects()`.
+    """
+    rel = np.asarray(relative_expression, dtype=float)
+    es = 1.0 - rel
+    out = np.tile(rel, (n_guides, 1))  # exact where es == 0 or c == 0
+    draw = (es > 0) & (guide_spread_c > 0)
+    if draw.any():
+        e = es[draw]
+        nu = 1.0 / (guide_spread_c**2 * e * (1.0 - e)) - 1.0
+        out[:, draw] = rng.beta((1.0 - e) * nu, e * nu, size=(n_guides, int(draw.sum())))
+    return out
+
+
 def _pin_to_mean(block: np.ndarray, target: np.ndarray) -> np.ndarray:
     """Row by row, the values max(v + c, 0) whose mean is exactly `target`.
 
@@ -196,7 +222,7 @@ def _pin_to_mean(block: np.ndarray, target: np.ndarray) -> np.ndarray:
 def effect_size_matrix(
     assignment: GuideAssignment,
     gene_effect_sizes: np.ndarray,
-    guide_sd: float,
+    guide_spread_c: float,
     rng: np.random.Generator,
     *,
     tol: float = 1e-12,
@@ -204,10 +230,9 @@ def effect_size_matrix(
     """A (genes x cells) multiplier, with each of the target's guides at its own effect.
 
     `gene_effect_sizes` is the *relative expression* the target aims for -- a
-    15% knockdown is 0.85 -- one per gene. Each of the target's guides draws
-    around it, independently per gene, and negatives clamp to 0 because a guide
-    cannot make expression negative. Every other guide, and every cell carrying
-    no guide, is exactly 1.
+    15% knockdown is 0.85 -- one per gene. Each of the target's guides draws its
+    own effect around it (`draw_guide_effects`), independently per gene. Every
+    other guide, and every cell carrying no guide, is exactly 1.
 
     Then each gene's mean over the perturbed cells is **pinned** to what was
     asked for. That is what makes simulated power the power at a fixed element
@@ -228,8 +253,7 @@ def effect_size_matrix(
     # Row 0 is the no-effect row, for cells carrying no guide at all; the rows
     # after the target's block belong to other guides. Both stay at exactly 1.
     table = np.ones((1 + n_target + n_other, n_genes))
-    table[1 : 1 + n_target] = rng.normal(gene_effect_sizes, guide_sd, size=(n_target, n_genes))
-    np.clip(table, 0.0, None, out=table)
+    table[1 : 1 + n_target] = draw_guide_effects(gene_effect_sizes, n_target, guide_spread_c, rng)
 
     matrix = table[assignment.status].T  # (genes, cells)
 
