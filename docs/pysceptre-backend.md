@@ -909,3 +909,28 @@ where the operations are the same and to a stated tolerance where the fits are b
 Both moi5 sweeps, cis (3.3M pair-tests) and trans (74M), in under an hour of wall clock, about 30-40
 min of it simulation. On the estimates above this needs a pair-test of ≤ 0.15-0.2 s per vCPU on
 cloud against 0.55 s today. The measurements decide whether items 3-4 reach it.
+
+### 6. Re-check the guide spread, value and form (not yet run)
+
+The spread behind 0.0829 at es 0.15 is `c * es * (1 - es)` with c = 0.65 (`methods.md`,
+"Guide-to-guide variability"). `methods.md` says sampling noise was removed for the null pairs
+(spread 0.004-0.014). It does not say the same for the enhancer bins that fixed the form and c
+(0.015 / 0.056 / 0.105 / 0.144 / 0.108 at es 0.03 / 0.10 / 0.21 / 0.37 / 0.59). Each guide's
+knockdown is estimated from its own cells, a few dozen per guide, so if the bins were not corrected
+their spread includes estimation noise, and c overstates the true between-guide spread.
+
+To do, on the same three screens (DC-TAP K562, DC-TAP WTC11, moi5), before anything else depends
+on 0.65:
+- **Confirm the correction.** Check whether the bins subtracted each guide's sampling variance,
+  from the fitting scripts under the 2026-09-25 working files (`guide_spread/`).
+- **Refit both the value and the form** with that noise removed:
+  - c, per screen and pooled;
+  - the chi-square of `c * es * (1 - es)` against the absolute and constant-CV forms.
+- **Carry through the downstream numbers that would change if c moves:**
+  - the default `guide_spread_c`;
+  - the PerturbPlan setting matched to the random estimand (item 1);
+  - the 0.0829 in WattEG-paper `docs/perturbplan_comparison.md` and `paper/06_prediction.md`.
+
+Under the fixed estimand the stakes are small: no moi5 pair's power moves by more than 0.02 between
+this spread and none. Under the random estimand, and in the PerturbPlan comparison, the value
+matters directly.
