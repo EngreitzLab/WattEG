@@ -145,6 +145,7 @@ def simulate_target(
     expression_model: str = "fitted",
     permutations: str = "per-replicate",
     nulls: str = "scan",
+    estimand: str = "fixed",
 ) -> pd.DataFrame | None:
     """Simulate and test one target, returning one row per (pair, replicate).
 
@@ -207,7 +208,10 @@ def simulate_target(
     for rep in reps:
         rng = rng_for(seed, target, rep, effect_size)
         counts = draw_counts(
-            baseline, effect_size_matrix(assignment, wanted, guide_spread_c, rng), theta, rng
+            baseline,
+            effect_size_matrix(assignment, wanted, guide_spread_c, rng, estimand=estimand),
+            theta,
+            rng,
         )
         with null_route(nulls):
             result = run_discovery_ntcells_complement(

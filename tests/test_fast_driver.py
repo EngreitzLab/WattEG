@@ -347,3 +347,59 @@ def test_the_cli_refuses_reuse_without_the_fast_driver(tmp_path):
         main([*args, "--driver", "engine", "--null-fits", "reuse"])
     with pytest.raises(SystemExit, match="read only under --null-fits reuse"):
         main([*args, "--null-fits", "refit", "--null-fits-file", str(tmp_path / "f.h5")])
+
+
+def test_effect_size_zero_gives_the_same_rows_under_both_estimands():
+    """At es 0 the guides' spread is zero, so --estimand random and fixed are one simulation:
+    the same rows from the engine and from the fast driver."""
+    sim, target_guides = fixture_sim()
+    kw = dict(
+        effect_size=0.0, reps=range(1, 5), seed=3, params=PARAMS, grna_csc=sim.grna_perts.tocsc()
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for estimand in ("fixed", "random"):
+            engine = simulate_target(
+                sim,
+                "elem1",
+                sim.genes,
+                target_guides,
+                n_jobs=1,
+                permutations="per-target",
+                nulls="sparse",
+                estimand=estimand,
+                **kw,
+            )
+            faster = simulate_target_fast(
+                sim, "elem1", sim.genes, target_guides, estimand=estimand, **kw
+            )
+            if estimand == "fixed":
+                reference = engine
+            assert_same_frame(reference, engine)
+            assert_same_frame(reference, faster)
+
+
+def test_the_random_estimand_changes_the_counts_and_both_drivers_agree_on_them():
+    engine_fixed, fast_fixed = both(0.25, reps=range(1, 5))
+    sim, target_guides = fixture_sim()
+    kw = dict(
+        effect_size=0.25, reps=range(1, 5), seed=3, params=PARAMS, grna_csc=sim.grna_perts.tocsc()
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        engine = simulate_target(
+            sim,
+            "elem1",
+            sim.genes,
+            target_guides,
+            n_jobs=1,
+            permutations="per-target",
+            nulls="sparse",
+            estimand="random",
+            **kw,
+        )
+        faster = simulate_target_fast(
+            sim, "elem1", sim.genes, target_guides, estimand="random", **kw
+        )
+    assert_same_frame(engine, faster)
+    assert not engine["log_2_fold_change"].equals(engine_fixed["log_2_fold_change"])

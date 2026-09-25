@@ -19,10 +19,14 @@ guide drew an extra N(1, 0.13), as in the original DC-TAP code. That
 counted the noise twice (theta 146 refit to 42 on a gene's own simulated null
 data) and understated power for highly expressed, low-dispersion genes.
 
-**The perturbed cells' mean is pinned.** Simulated power is power at a FIXED
-element effect (decided 2026-09-24; see docs/methods.md): in every replicate
-the realised mean effect across the perturbed cells equals the requested one.
-The target's guides still differ from each other; only their mean is fixed.
+**Two estimands.** Under `fixed` (the default, decided 2026-09-24; see
+docs/methods.md) the perturbed cells' mean is pinned: in every simulation the
+realised mean effect across the perturbed cells equals the requested one, so
+power is power at a FIXED element effect. The target's guides still differ from
+each other; only their mean is fixed. Under `random` (added 2026-09-25) the pin
+is skipped and the realised mean is left where the guide draws put it, so power
+is averaged over the element's realised effect, whose mean is the requested one.
+The guide spread is zero at es = 0, so the two are the same simulation there.
 
 **Built directly in cell order.** R assembled the guide assignment as
 perturbed-cells-then-control-cells and then permuted it back, a legacy of
@@ -38,6 +42,11 @@ import numpy as np
 from scipy import sparse
 
 NO_GUIDE = 0
+
+# What simulated power is power FOR (docs/methods.md, "What simulated power means"). "fixed": the
+# element's realised mean effect over its perturbed cells is pinned to the requested one in every
+# simulation. "random": it is left where the guides' draws put it.
+ESTIMANDS = ("fixed", "random")
 
 
 @dataclass(frozen=True)
@@ -225,6 +234,7 @@ def effect_size_matrix(
     guide_spread_c: float,
     rng: np.random.Generator,
     *,
+    estimand: str = "fixed",
     tol: float = 1e-12,
 ) -> np.ndarray:
     """A (genes x cells) multiplier, with each of the target's guides at its own effect.
@@ -234,18 +244,24 @@ def effect_size_matrix(
     own effect around it (`draw_guide_effects`), independently per gene. Every
     other guide, and every cell carrying no guide, is exactly 1.
 
-    Then each gene's mean over the perturbed cells is **pinned** to what was
+    Under `estimand="random"` that is the result. Under `"fixed"`, the default,
+    each gene's mean over the perturbed cells is then **pinned** to what was
     asked for. That is what makes simulated power the power at a fixed element
-    effect (see the module docstring). It is not a correction for clamping,
-    which is what this docstring used to claim: at es 0.15 a guide clamps with
-    probability ~3e-11. The result is max(v + c, 0), where v are the perturbed
-    cells' already-clamped effects and c is the one constant that puts the mean
-    exactly on the target (`_pin_to_mean`). Where nothing would clamp, which is
-    every realistic case up to es 0.5, that is the plain shift, to a few ulps. An earlier version
+    effect (see the module docstring). Neither consumes a draw the other does
+    not, so both simulate the same guide effects before the pin.
+
+    The pin is not a correction for clamping, which is what this docstring used
+    to claim: at es 0.15 a guide clamps with probability ~3e-11. The result is
+    max(v + c, 0), where v are the perturbed cells' already-clamped effects and
+    c is the one constant that puts the mean exactly on the target
+    (`_pin_to_mean`). Where nothing would clamp, which is every realistic case
+    up to es 0.5, that is the plain shift, to a few ulps. An earlier version
     shifted, clamped and repeated; once most cells clamp that converges slowly,
     and at es >= ~0.99 it ran out of iterations and raised on a pin that exists.
     R does the same in `center_effect_size_matrix()`.
     """
+    if estimand not in ESTIMANDS:
+        raise ValueError(f"estimand must be one of {ESTIMANDS}, got {estimand!r}")
     gene_effect_sizes = np.asarray(gene_effect_sizes, dtype=float)
     n_genes = gene_effect_sizes.size
     n_target, n_other = assignment.n_target_guides, assignment.n_other_guides
@@ -265,7 +281,7 @@ def effect_size_matrix(
         )
 
     perturbed = assignment.is_perturbed
-    if perturbed.any():
+    if estimand == "fixed" and perturbed.any():
         block = _pin_to_mean(matrix[:, perturbed], gene_effect_sizes)
         gap = gene_effect_sizes - block.mean(axis=1)
         # The check is for real failures (NaN, a logic error), not rounding, so its

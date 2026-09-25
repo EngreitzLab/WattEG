@@ -37,16 +37,36 @@ before, which cost several regenerations:
 - WattEG inherited the same order. On 2026-09-21 (`2b76284`) the reorder was moved before the
   centring. That fixed a real indexing bug and, with it, silently changed which quantity was
   simulated.
-- The alternative, random guide effects, is *expected* power averaged over a prior on the
-  knockdown. It is a different quantity, and as the draws are parameterised it does not even start
-  at α: at effect size 0 a target's guides still move expression, so a null element on a highly
-  expressed gene is "detected" around 20% of the time. If uncertainty about guide efficiency is
-  wanted, it belongs in a separately labelled output with a multiplicative efficiency model.
+- The alternative, random guide effects, is *expected* power averaged over the element's realised
+  knockdown. It is a different quantity, and with the old absolute spread it did not even start at
+  α: at effect size 0 a target's guides still moved expression, so a null element on a highly
+  expressed gene was "detected" around 20% of the time.
 
-Two consequences to accept knowingly. WattEG does not reproduce the published DC-TAP per-pair power,
-which is the other quantity. And the guides' spread barely moves power at effect sizes up to 0.5,
-because spread around a pinned mean adds little variance to what the test sees: on moi5, no pair's
-power moves by more than 0.02 between the spread described below and no spread at all.
+Two consequences to accept knowingly. The fixed estimand does not reproduce the published DC-TAP
+per-pair power, which is the other quantity. And the guides' spread barely moves power at effect
+sizes up to 0.5, because spread around a pinned mean adds little variance to what the test sees: on
+moi5, no pair's power moves by more than 0.02 between the spread described below and no spread at
+all.
+
+### The random estimand, as an option
+
+`--estimand fixed | random` (Nextflow `estimand`), default `fixed`, added 2026-09-25. It became
+safe to offer once the guide spread vanished at effect size 0 (next section): the null is now the
+same simulation under both.
+
+| | `fixed` (default) | `random` |
+|---|---|---|
+| each guide's knockdown | Beta, mean es, sd `c * es * (1 - es)` | the same draw |
+| the element's realised mean over its perturbed cells | pinned to es in every simulation | left where the draws put it |
+| question answered | power for an element whose effect *is* es | power for an element whose effect is es *on average* |
+| PerturbPlan setting that asks the same | `fold_change_sd = 0` | `fold_change_sd = c * es * (1 - es)` (0.0829 at es 0.15) |
+
+Under `random` the realised mean varies between simulations with sd
+`c * es * (1 - es) * sqrt(sum n_g^2) / sum n_g` over the guides' perturbed-cell counts `n_g`: the
+variance of a cell-weighted mean. Both estimands draw the same guide effects from the same stream;
+`random` only skips the pin, and control cells are exactly 1 under both. The estimand is written
+into every per-simulation row, the power table and the summary, and the power steps refuse input
+that mixes them. It is implemented in the Python path only; the R reference has not had it added.
 
 ## Guide-to-guide variability
 
@@ -94,12 +114,12 @@ to the original DC-TAP code. That counted the noise twice: a gene with theta 146
 own simulated null data with theta 42, and power was understated for highly expressed,
 low-dispersion genes.
 
-**The perturbed cells' mean is then pinned** to the requested relative expression, gene by gene: the
-perturbed block is shifted so its row mean equals `1 - effect_size` exactly. This step is what makes
-the effect *fixed* (previous section). It is not a correction for clamping, which is what this page
-used to say. Because the draw's mean is already `1 - es`, the pin only removes one replicate's
-sampling wobble. At strong knockdowns a plain shift could push some guides below zero, so the shift
-is solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c` that puts the
+**Under the fixed estimand, the perturbed cells' mean is then pinned** to the requested relative
+expression, gene by gene: the perturbed block is shifted so its row mean equals `1 - effect_size`
+exactly. This step is what makes the effect *fixed* (previous section). It is not a correction for
+clamping, which is what this page used to say. Because the draw's mean is already `1 - es`, the pin
+only removes one simulation's sampling wobble. At strong knockdowns a plain shift could push some
+guides below zero, so the shift is solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c` that puts the
 mean on the target, which always exists for an effect size below 1. (An earlier version shifted,
 clamped and repeated; once most cells clamp that converges slowly, and at effect size ≥ 0.99 it ran
 out of iterations and stopped the run on a pin that exists.)

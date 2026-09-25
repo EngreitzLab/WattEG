@@ -42,12 +42,15 @@ num_replicates: 100
 # three CRISPRi screens (docs/methods.md). Replaces guide_sd, which the pipeline now refuses.
 guide_spread_c: 0.65
 
+# What the power is power for (docs/methods.md, "What simulated power means"). 'fixed': an element
+# whose effect IS the effect size, the guides' cell-weighted mean pinned to it in every simulation.
+# 'random': an element whose effect is the effect size on average (the question PerturbPlan asks
+# with fold_change_sd = c * es * (1 - es)). Identical at effect size 0. Written into every output.
+estimand: fixed
+
 # Parallelisation only; does not affect results. Seeds derive from
 # (seed, target, rep, effect_size), so output is invariant to the split layout.
 n_splits: 1000
-
-# Simulations per null-model task (step 02b). One fit covers every gene on one simulation in ~20
-# minutes, so 1 per task keeps the whole set at ~20 minutes rather than ~33 hours serial.
 
 # Simulations per simulation task. Set equal to num_replicates for no chunking, which is what every
 # run so far has done and what the measured cost model assumes.

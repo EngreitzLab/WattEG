@@ -218,19 +218,57 @@ def test_the_realised_mean_is_pinned_and_control_cells_are_exactly_one(es):
         assert (m[:, ~fx.is_perturbed] == 1.0).all()
 
 
-def test_without_the_pin_the_realised_mean_would_wander():
-    """What the pin removes. Drawing the same guide effects and applying them
-    without pinning, the realised mean varies from replicate to replicate by
-    about the guides' sd * sqrt(sum n_g^2) / sum n_g -- the other estimand,
-    random guide effects."""
+@pytest.mark.parametrize("es", [0.05, 0.15, 0.5])
+def test_under_the_random_estimand_the_realised_mean_has_the_cell_weighted_spread(es):
+    """--estimand random skips the pin. The realised mean over the perturbed cells is then the
+    guides' draws weighted by their cell counts n_g, so its sd over simulations is
+    c * es * (1 - es) * sqrt(sum n_g^2) / sum n_g: the variance of a cell-weighted mean. Control
+    cells stay exactly 1."""
     fx = fixture_assignment()
     status = fx.assignment.status[fx.is_perturbed]
+    n_g = np.bincount(status, minlength=fx.assignment.n_target_guides + 1)[1:]
+    expected = 0.65 * es * (1 - es) * np.sqrt((n_g**2).sum()) / n_g.sum()
     rng = np.random.default_rng(8)
     means = []
-    for _ in range(200):
-        draws = draw_guide_effects(np.array([0.85]), fx.assignment.n_target_guides, 0.65, rng)[:, 0]
-        means.append(draws[status - 1].mean())
-    assert np.std(means) > 0.01
+    for _ in range(2000):
+        m = effect_size_matrix(
+            fx.assignment, np.array([1.0 - es]), guide_spread_c=0.65, rng=rng, estimand="random"
+        )
+        assert (m[:, ~fx.is_perturbed] == 1.0).all()
+        means.append(m[0, fx.is_perturbed].mean())
+    assert np.std(means) == pytest.approx(expected, rel=0.08)
+    assert np.mean(means) == pytest.approx(1.0 - es, abs=4 * expected / np.sqrt(len(means)))
+
+
+def test_the_estimands_draw_the_same_guides_and_differ_only_by_the_pin():
+    """Same stream, same draws: the random matrix pinned is the fixed matrix, and the generator is
+    left in the same state, so everything drawn after it (the counts) is drawn alike."""
+    from watteg.perturbation import _pin_to_mean
+
+    fx = fixture_assignment()
+    wanted = np.array([0.85, 0.7])
+    a, b = np.random.default_rng(31), np.random.default_rng(31)
+    fixed = effect_size_matrix(fx.assignment, wanted, 0.65, a)
+    random = effect_size_matrix(fx.assignment, wanted, 0.65, b, estimand="random")
+    assert a.random() == b.random()
+    assert not np.allclose(random[:, fx.is_perturbed].mean(axis=1), wanted, atol=1e-6)
+    assert np.array_equal(fixed[:, ~fx.is_perturbed], random[:, ~fx.is_perturbed])
+    np.testing.assert_array_equal(
+        fixed[:, fx.is_perturbed], _pin_to_mean(random[:, fx.is_perturbed], wanted)
+    )
+    default = effect_size_matrix(fx.assignment, wanted, 0.65, np.random.default_rng(31))
+    assert np.array_equal(default, fixed)
+    with pytest.raises(ValueError, match="estimand must be one of"):
+        effect_size_matrix(fx.assignment, wanted, 0.65, np.random.default_rng(1), estimand="x")
+
+
+def test_at_effect_size_zero_the_two_estimands_are_one_simulation():
+    fx = fixture_assignment()
+    a, b = np.random.default_rng(5), np.random.default_rng(5)
+    fixed = effect_size_matrix(fx.assignment, np.ones(3), 0.65, a)
+    random = effect_size_matrix(fx.assignment, np.ones(3), 0.65, b, estimand="random")
+    assert np.array_equal(fixed, random) and (fixed == 1.0).all()
+    assert a.random() == b.random()
 
 
 def test_the_guide_status_is_each_cells_own_guide():

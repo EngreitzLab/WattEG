@@ -172,3 +172,12 @@ def test_the_interval_on_power_inverts_into_the_interval_on_effect_size():
     conservative = min_detectable_effect_size(ci_low, GRID, 0.8)[0]
     assert optimistic <= estimate <= conservative
     assert (optimistic, estimate, conservative) == (0.1, 0.15, 0.2)
+
+
+def test_the_estimand_is_carried_and_mixing_estimands_is_refused():
+    fixed = simulations([1e-5, 0.5], [-0.2, -0.1]).assign(estimand="fixed")
+    power = compute_power(fixed, threshold=1e-3)
+    assert power["estimand"].tolist() == ["fixed"]
+    mixed = pd.concat([fixed, simulations([1e-5], [-0.2], gene="geneY").assign(estimand="random")])
+    with pytest.raises(ValueError, match="mixes estimands"):
+        compute_power(mixed, threshold=1e-3)

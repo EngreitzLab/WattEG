@@ -30,6 +30,7 @@ from watteg.engine import (
     AnalysisParams,
     simulate_target,
 )
+from watteg.perturbation import ESTIMANDS
 from watteg.sim_input import read_sim_input
 from watteg.workers import SHARED as _SHARED
 from watteg.workers import map_units
@@ -53,6 +54,8 @@ KEEP = [
     "pass_qc",
     "n_nonzero_trt",
     "n_nonzero_cntrl",
+    # Last, so a table from before the option existed is this one minus its final column.
+    "estimand",
 ]
 
 # How each gene's null model is fitted under the fast driver. "refit" fits it on every simulation's
@@ -82,6 +85,7 @@ def _run_unit(unit: tuple) -> tuple:
         expression_model=shared["expression_model"],
         permutations=shared["permutations"],
         nulls=shared["nulls"],
+        estimand=shared["estimand"],
     )
     return target, frame, time.perf_counter() - at
 
@@ -109,6 +113,7 @@ def _run_fast_unit(unit: tuple) -> tuple:
         guide_spread_c=shared["guide_spread_c"],
         expression_model=shared["expression_model"],
         null_fits=shared.get("null_fits"),
+        estimand=shared["estimand"],
     )
     return target, frame, time.perf_counter() - at
 
@@ -201,9 +206,20 @@ def main(argv: list[str] | None = None) -> int:
         "--effect-size",
         type=float,
         required=True,
-        help="a fractional decrease: 0.15 is a 15%% knockdown. 0 is the null arm. Power is "
-        "reported at a FIXED element effect: in every replicate the realised mean knockdown "
-        "across the perturbed cells equals this value exactly (see docs/methods.md)",
+        help="a fractional decrease: 0.15 is a 15%% knockdown. 0 simulates no effect. Under "
+        "--estimand fixed the realised mean knockdown across the perturbed cells equals this "
+        "value exactly in every simulation; under --estimand random it is this value on "
+        "average (see docs/methods.md)",
+    )
+    parser.add_argument(
+        "--estimand",
+        choices=ESTIMANDS,
+        default="fixed",
+        help="what the power is power for. 'fixed': an element whose effect IS --effect-size, "
+        "the guides' cell-weighted mean pinned to it in every simulation. 'random': an element "
+        "whose effect is --effect-size on average, the mean left where the guide draws put it "
+        "(the question PerturbPlan asks with fold_change_sd = c * es * (1 - es)). The same "
+        "simulation at --effect-size 0. Written into every output row [default %(default)s]",
     )
     parser.add_argument("--reps", type=int, required=True)
     parser.add_argument(
@@ -294,14 +310,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    # Zero is allowed on purpose: it is the null arm, and running it is the only
+    # Zero is allowed on purpose: it simulates no effect, and running it is the only
     # way to measure this pipeline's false-call rate from its own output. Note what
     # it measures: a call needs p < threshold AND a negative fold change, so with a
     # two-sided p-value it estimates about alpha/2, not alpha.
     if not 0.0 <= args.effect_size < 1.0:
         raise SystemExit(
             f"--effect-size must be a fractional decrease in [0, 1) (got {args.effect_size}); "
-            "0 is the null arm"
+            "0 simulates no effect"
         )
     if args.reps < 1:
         raise SystemExit("--reps must be at least 1")
@@ -351,7 +367,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"{len(genes_of)} targets / {len(split)} pairs, replicates {reps.start}-{reps.stop - 1}, "
-        f"effect size {args.effect_size} (relative expression {1 - args.effect_size:g})\n"
+        f"effect size {args.effect_size} (relative expression {1 - args.effect_size:g}), "
+        f"estimand {args.estimand}\n"
         f"  baseline: {args.expression_model}, permutations {args.permutations}, "
         + (
             f"nulls {args.nulls}, "
@@ -380,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         expression_model=args.expression_model,
         permutations=args.permutations,
         nulls=args.nulls,
+        estimand=args.estimand,
     )
     _SHARED.update(sim=sim, params=params, grna_csc=sim.grna_perts.tocsc(), **settings)
     if args.driver == "fast" and args.null_fits == "reuse":
@@ -418,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     for column in ("pass_qc", "n_nonzero_trt", "n_nonzero_cntrl"):
         if column not in combined:
             combined[column] = np.nan
+    combined["estimand"] = args.estimand
     info = args.prepared / "pairs_with_info.tsv"
     if info.exists():
         # Real-data QC counts, constant across replicates, joined rather than

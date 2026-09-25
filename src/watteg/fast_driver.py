@@ -162,6 +162,7 @@ def simulate_target_fast(
     expression_model: str = "fitted",
     stage2_columns: int = DEFAULT_STAGE2_COLUMNS,
     null_fits=None,
+    estimand: str = "fixed",
 ) -> pd.DataFrame | None:
     """`engine.simulate_target(..., permutations="per-target", nulls="sparse")`, faster.
 
@@ -290,7 +291,10 @@ def simulate_target_fast(
     for pos, rep in enumerate(reps):
         rng = rng_for(seed, target, rep, effect_size)
         counts = draw_counts(
-            baseline, effect_size_matrix(assignment, wanted, guide_spread_c, rng), theta_true, rng
+            baseline,
+            effect_size_matrix(assignment, wanted, guide_spread_c, rng, estimand=estimand),
+            theta_true,
+            rng,
         )
         fits: dict[str, object] = {}
         for gene in unique_genes:

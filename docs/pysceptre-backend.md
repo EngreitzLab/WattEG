@@ -833,7 +833,24 @@ actual test on its actual cells, covariates, guide assignment and threshold, inc
 permutation test with its escalation. Every speed-up below has to preserve that. None of them
 approximates the design.
 
-### 1. A second estimand: random guide effects
+### 1. A second estimand: random guide effects -- done in Python; R not yet
+
+**Done 2026-09-25 in Python** (`watteg.perturbation.effect_size_matrix(estimand=)`, `--estimand`,
+Nextflow `estimand`; written as the last column of every per-simulation row, into the power table
+and the summary, and refused when mixed). Checked on the shared fixture and the cis reference target:
+- es = 0: identical rows under both (engine and fast driver, fixture; CLI, 20 simulations), apart
+  from the estimand label; the generator is left in the same state, so the counts are drawn alike.
+- `fixed` output unchanged by the option: every earlier output (cis at es 0 and 0.15, trans, the
+  engine's per-replicate scan run) is today's file minus its new last column, byte for byte.
+- `random`: the realised mean's sd over 2,000 draws matches `c * es * (1 - es) * sqrt(sum n_g^2) /
+  sum n_g` within 8 % at es 0.05, 0.15 and 0.5, and control cells stay exactly 1.
+- cis reference target, 100 simulations, es 0.15: 808 calls of 1,200 under `fixed`, 781 under
+  `random` (mean power 0.673 against 0.651); the simulated fold change's sd over simulations rises
+  from 0.056 to 0.067 (median over pairs).
+
+**Still to do:** the R side (`simulate_effect_sizes` skipping `center_effect_size_matrix`) on the
+`r-implementation` branch, so Stage B can check it; the cis sweep under `random` scored against
+PerturbPlan (last check below), which waits on item 6.
 
 `--estimand fixed | random`, default `fixed`, in both implementations so Stage B can check it.
 

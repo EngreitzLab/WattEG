@@ -98,6 +98,12 @@ def compute_power(
                 "once per effect size."
             )
 
+    if "estimand" in usable.columns and usable["estimand"].nunique() > 1:
+        raise ValueError(
+            f"the input mixes estimands ({', '.join(map(str, usable['estimand'].unique()))}); "
+            "they answer different questions. Compute power once per estimand."
+        )
+
     called = (usable["p_value"] < threshold) & (usable["log_2_fold_change"] < 0)
     grouped = usable.assign(_called=called).groupby(
         ["grna_target", "response_id"], sort=False, as_index=False
@@ -117,6 +123,8 @@ def compute_power(
             agg[name] = (column, "mean")
     if "effect_size" in usable.columns:
         agg["effect_size"] = ("effect_size", "first")
+    if "estimand" in usable.columns:
+        agg["estimand"] = ("estimand", "first")
 
     power = grouped.agg(**agg)
     low, high = wilson_interval(power["successes"], power["n_reps"], conf_level)

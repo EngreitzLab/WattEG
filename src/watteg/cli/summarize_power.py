@@ -102,11 +102,24 @@ def main(argv: list[str] | None = None) -> int:
                 out["response_id"].map(row["average_expression_all_cells"]).to_numpy()
             )
 
+    # Which question the power answers (docs/methods.md). One summary answers one: a curve whose
+    # effect sizes were simulated under different estimands would read as one quantity and not be.
+    estimands = {e for t in tables if "estimand" in t.columns for e in t["estimand"].dropna()}
+    if len(estimands) > 1:
+        raise SystemExit(f"the inputs mix estimands ({', '.join(sorted(estimands))})")
+    if estimands:
+        out["estimand"] = estimands.pop()
+
     power_columns = []
     for table, effect_size in zip(tables, effect_sizes, strict=True):
         base = f"power_at_effect_size_{effect_label(effect_size)}"
         power_columns.append(base)
-        joined = out.merge(table, on=KEY, how="left", suffixes=("", "_new"))
+        joined = out.merge(
+            table.drop(columns="estimand", errors="ignore"),
+            on=KEY,
+            how="left",
+            suffixes=("", "_new"),
+        )
         out[base] = joined["power"].to_numpy()
         for source, suffix in (
             ("power_ci_low", "_ci_low"),
