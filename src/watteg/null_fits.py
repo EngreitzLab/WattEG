@@ -336,7 +336,7 @@ def compute_null_fits(
     """
     from .workers import SHARED, map_units
 
-    SHARED.setdefault("sim", sim)
+    SHARED["sim"] = sim
     genes = list(dict.fromkeys(genes))
     units = [(int(r), tuple(genes), int(seed), expression_model) for r in reps]
     n = min(max(workers, 1), len(units))
