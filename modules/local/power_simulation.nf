@@ -8,11 +8,12 @@
 // second or so against a task measured in minutes, while the loop would multiply each task's
 // duration by the number of effect sizes and divide the parallelism by the same factor.
 //
-// THERE IS NO --null-precomputations, AND THAT IS THE POINT. R hoisted the per-gene null model out
-// of the simulation because refitting it inside every call cost 4.3x. The Python path fits each
-// gene's null on that replicate's own simulated counts as a matter of course, which is the faithful
-// configuration R's hoist was built to approximate -- so FIT_NULL_MODELS and MERGE_NULL_MODELS are
-// gone, along with the seed-matching guard between a bundle and the run that consumes it.
+// NULL-MODEL FITS. Under --driver fast --null-fits reuse each gene's null model comes from
+// FIT_NULL_MODELS (one fit per gene per simulation, on an independent draw with no knockdown), staged
+// here as null_fits.h5 and checked against this run's seed, baseline and sim_input before use. Under
+// --null-fits refit the placeholder is empty and every gene is refitted on each simulation's own
+// counts for every target, the exact configuration. R hoisted the fits for speed too; this is the
+// same approximation, with its seed-matching guard.
 
 process POWER_SIMULATION {
     tag "${meta.id} ${split.baseName} es${effect_size} reps ${rep_offset + 1}-${rep_offset + reps}"
@@ -27,8 +28,10 @@ process POWER_SIMULATION {
     // analysis_mode.tsv is read by the CLI from --prepared (here, the task directory). It was not
     // staged until 2026-09-24, so every real run of this process died with FileNotFoundError and
     // every Python number so far came from direct CLI calls; the stub never reads it.
+    //
+    // null_fits is FIT_NULL_MODELS' file under --null-fits reuse, and an empty placeholder otherwise.
     tuple val(meta), path(sim_input), path(grna_targets), path(analysis_mode), path(pairs_with_info),
-          path(split), val(effect_size), val(rep_offset), val(reps)
+          path(null_fits), path(split), val(effect_size), val(rep_offset), val(reps)
 
     output:
     tuple val(meta), val(effect_size), path(out_name), emit: sim
@@ -37,6 +40,7 @@ process POWER_SIMULATION {
     // The replicate range is in the filename so chunks of one split cannot collide and a stray file
     // is attributable.
     out_name = "${split.baseName}_es${effect_size}_rep${rep_offset}.tsv.gz"
+    def fits_arg = null_fits ? "--null-fits-file ${null_fits}" : ''
     """
     # One thread per worker. The task's parallelism is its --n-jobs worker processes; a BLAS or
     # OpenMP thread pool in the parent when it forks them is oversubscription at best and a known
@@ -55,6 +59,9 @@ process POWER_SIMULATION {
             --n-jobs ${task.cpus} \\
             --expression-model ${params.expression_model} \\
             --permutations ${params.permutations} \\
+            --nulls ${params.nulls} \\
+            --driver ${params.driver} \\
+            --null-fits ${params.null_fits} ${fits_arg} \\
             --out ${out_name.replace('.gz', '')}
     gzip -f ${out_name.replace('.gz', '')}
 

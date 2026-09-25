@@ -31,6 +31,8 @@ from watteg.engine import (
     simulate_target,
 )
 from watteg.sim_input import read_sim_input
+from watteg.workers import SHARED as _SHARED
+from watteg.workers import map_units
 
 # "engine" calls pysceptre once per (target, simulation). "fast" (watteg.fast_driver) runs a
 # target's simulations together so its permutation matrices are built once, with output
@@ -53,20 +55,10 @@ KEEP = [
     "n_nonzero_cntrl",
 ]
 
-# The bulk inputs, for the task-level pool. A worker reads them from here instead of
-# receiving them: under fork a child inherits them without a copy, and only the small
-# (target, replicate) descriptor crosses the process boundary.
-_SHARED: dict = {}
-
-
-def _limit_blas_threads() -> None:
-    """One BLAS thread per worker, so N workers do not start N x cores threads."""
-    try:
-        from threadpoolctl import threadpool_limits
-
-        threadpool_limits(limits=1, user_api="blas")
-    except Exception:  # pragma: no cover - threadpoolctl comes with pysceptre
-        pass
+# How each gene's null model is fitted under the fast driver. "refit" fits it on every simulation's
+# own counts, once per target, as the engine does. "reuse" fits it once per (gene, simulation) on an
+# independent null draw and shares it across targets and effect sizes (watteg.null_fits).
+NULL_FIT_MODES = ("reuse", "refit")
 
 
 def _run_unit(unit: tuple) -> tuple:
@@ -116,6 +108,7 @@ def _run_fast_unit(unit: tuple) -> tuple:
         grna_csc=shared["grna_csc"],
         guide_spread_c=shared["guide_spread_c"],
         expression_model=shared["expression_model"],
+        null_fits=shared.get("null_fits"),
     )
     return target, frame, time.perf_counter() - at
 
@@ -138,66 +131,59 @@ def _fast_units(genes_of, guides_of, reps: range, workers: int) -> list:
     ]
 
 
-def _load_shared(prepared: Path, settings: dict) -> None:
-    sim = read_sim_input(prepared / "sim_input.h5")
-    _SHARED.update(
-        sim=sim,
-        params=AnalysisParams.from_analysis_mode(prepared / "analysis_mode.tsv"),
-        grna_csc=sim.grna_perts.tocsc(),
-        **settings,
-    )
-
-
-def _init_spawned(prepared: Path, settings: dict) -> None:
-    _limit_blas_threads()
-    _load_shared(prepared, settings)
-
-
 def _map_units(units: list, workers: int, prepared: Path, settings: dict, fn=_run_unit) -> list:
-    """Run the units in parallel, in PROCESSES, returning them in submission order.
-
-    Never threads: pysceptre's discovery call keeps its working state in a module global,
-    so two calls in one process overwrite each other (measured: KeyError 'permutations').
-    On Linux the workers are forked and inherit `_SHARED` without a copy. Elsewhere they are
-    spawned and each loads the inputs itself -- more memory, and only for local runs:
-    forking after Apple's Accelerate BLAS can deadlock, the same reason pysceptre gives.
+    """Run the units in parallel, in processes, in submission order (see `watteg.workers`).
 
     Each unit draws from its own seeded stream (`rng_for(seed, target, rep, effect_size)`),
     so the output does not depend on the worker count or the order the units finish in.
     """
-    if workers <= 1 or len(units) <= 1:
-        return [fn(u) for u in units]
-    import multiprocessing as mp
-    from concurrent.futures import ProcessPoolExecutor
+    return map_units(units, workers, prepared, settings, fn)
 
-    if sys.platform.startswith("linux"):
-        pool = ProcessPoolExecutor(
-            max_workers=workers, mp_context=mp.get_context("fork"), initializer=_limit_blas_threads
-        )
+
+def _null_fits_for_task(args, sim, split: pd.DataFrame, reps: range):
+    """The fits this task's genes need, from --null-fits-file or made here.
+
+    Made once in the parent, before the simulation's workers start, so a gene tested against
+    several of the task's targets is fitted once per simulation rather than once per worker.
+    Either way only the task's genes x simulations are kept, which is what a spawned worker is
+    sent.
+    """
+    from watteg.null_fits import NullFits, compute_null_fits, input_fingerprint
+
+    genes = list(dict.fromkeys(split["response_id"]))
+    at = time.perf_counter()
+    if args.null_fits_file is not None:
+        fits = NullFits.read(args.null_fits_file)
+        try:
+            fits.check_matches(
+                seed=args.seed,
+                expression_model=args.expression_model,
+                fingerprint=input_fingerprint(sim),
+                genes=genes,
+                reps=reps,
+            )
+        except ValueError as err:
+            raise SystemExit(f"{args.null_fits_file}: {err}") from None
+        source = f"read from {args.null_fits_file}"
     else:
-        pool = ProcessPoolExecutor(
-            max_workers=workers,
-            mp_context=mp.get_context("spawn"),
-            initializer=_init_spawned,
-            initargs=(prepared, settings),
+        workers = min(max(args.n_jobs, 1), len(reps))
+        fits = compute_null_fits(
+            sim,
+            genes,
+            reps,
+            seed=args.seed,
+            expression_model=args.expression_model,
+            workers=workers,
+            prepared=args.prepared,
         )
-    # A worker that dies (the out-of-memory killer, or a crash as the pool starts) breaks the
-    # whole pool. Python would then exit 1, which the pipeline reads as "our code is wrong, stop the
-    # run" -- one bad machine would end a sweep. Exit 137 instead: the pipeline retries it, with
-    # double the memory, which is right for the common cause and harmless for the rest. First seen
-    # 2026-09-25 on 1 of 200 moi5 cis tasks, 26 s into the task.
-    from concurrent.futures.process import BrokenProcessPool
-
-    try:
-        with pool:
-            return list(pool.map(fn, units))
-    except BrokenProcessPool:
-        print(
-            "ERROR: a worker process was killed (most often out of memory). Exiting 137 so the "
-            "task is retried with more memory.",
-            file=sys.stderr,
-        )
-        raise SystemExit(137) from None
+        source = f"fitted in this task on {workers} worker(s)"
+    fits = fits.subset(genes, reps)
+    bad = {k: v for k, v in fits.summary().items() if v}
+    print(
+        f"  null fits: {len(genes)} genes x {len(reps)} simulations, {source}, in "
+        f"{time.perf_counter() - at:.1f}s" + (f"; degenerate: {bad}" if bad else "")
+    )
+    return fits
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -282,6 +268,23 @@ def main(argv: list[str] | None = None) -> int:
         "always computes the nulls by the sparse route [default %(default)s]",
     )
     parser.add_argument(
+        "--null-fits",
+        choices=NULL_FIT_MODES,
+        default="refit",
+        help="with --driver fast: 'reuse' fits each gene's null model once per simulation, on an "
+        "independent draw with no knockdown, and uses that fit for every target the gene is "
+        "tested against (R's FIT_NULL_MODELS approximation, docs/methods.md); 'refit' fits it on "
+        "each simulation's own counts for every target, as the engine does [default %(default)s]",
+    )
+    parser.add_argument(
+        "--null-fits-file",
+        type=Path,
+        default=None,
+        help="with --null-fits reuse: the fits written by watteg-fit-null-models for this "
+        "prepared input and --seed. Without it the task fits its own genes first, with the same "
+        "keyed draws, so the values and the output are the same either way",
+    )
+    parser.add_argument(
         "--expression-model",
         choices=("fitted", "size_factor"),
         default="fitted",
@@ -318,6 +321,14 @@ def main(argv: list[str] | None = None) -> int:
             "--driver engine."
         )
 
+    if args.null_fits == "reuse" and args.driver != "fast":
+        raise SystemExit(
+            "--null-fits reuse needs --driver fast: the engine calls pysceptre's discovery "
+            "entry point, which fits every gene itself. Use --null-fits refit with --driver engine."
+        )
+    if args.null_fits_file is not None and args.null_fits != "reuse":
+        raise SystemExit("--null-fits-file is read only under --null-fits reuse")
+
     started = time.perf_counter()
     sim = read_sim_input(args.prepared / "sim_input.h5")
     params = AnalysisParams.from_analysis_mode(args.prepared / "analysis_mode.tsv")
@@ -345,7 +356,8 @@ def main(argv: list[str] | None = None) -> int:
         + (
             f"nulls {args.nulls}, "
             if args.driver == "engine"
-            else "driver fast, nulls sparse (the fast driver's only route), "
+            else f"driver fast, nulls sparse (the fast driver's only route), null fits "
+            f"{args.null_fits}, "
         )
         + f"n_jobs {args.n_jobs}, "
         f"B1/B2/B3 {params.B1}/{params.B2}/{params.B3}, side_code {params.side_code}"
@@ -370,6 +382,9 @@ def main(argv: list[str] | None = None) -> int:
         nulls=args.nulls,
     )
     _SHARED.update(sim=sim, params=params, grna_csc=sim.grna_perts.tocsc(), **settings)
+    if args.driver == "fast" and args.null_fits == "reuse":
+        settings["null_fits"] = _null_fits_for_task(args, sim, split, reps)
+        _SHARED["null_fits"] = settings["null_fits"]
     if args.driver == "fast":
         units = _fast_units(genes_of, guides_of, reps, max(args.n_jobs, 1))
         workers = min(max(args.n_jobs, 1), len(units))

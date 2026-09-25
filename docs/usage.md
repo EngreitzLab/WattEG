@@ -63,6 +63,9 @@ dataset.h5mu
       |  watteg-split-pairs            once per sample
       +--> split_001.tsv ...           balanced chunks of targets
       |
+      |  watteg-fit-null-models        once per sample, under --null-fits reuse
+      +--> null_fits.h5                each gene's null-model fit, per simulation
+      |
       |  watteg-run-power-simulation   once per (split, effect size, replicate chunk)
       +--> sim_*.tsv.gz                one row per (pair, replicate)
       |
@@ -76,10 +79,14 @@ dataset.h5mu
       +--> power_summary.tsv           one row per pair, one column per effect size
 ```
 
-There is no `sceptre_template.rds` and no null-model step. The template was an R object carrying
-the covariate matrix and the analysis parameters, which now live in `sim_input.h5` and
-`analysis_mode.tsv`. `FIT_NULL_MODELS` and `MERGE_NULL_MODELS` existed because R refitting a gene's
-null model inside every call cost 4.3×; the Python path does that refit as a matter of course.
+There is no `sceptre_template.rds`. It was an R object carrying the covariate matrix and the
+analysis parameters, which now live in `sim_input.h5` and `analysis_mode.tsv`.
+
+`watteg-fit-null-models` is the Python version of R's `FIT_NULL_MODELS`: each gene's null model is
+fitted once per simulation, on an independent draw with no knockdown, and every target the gene is
+tested with reuses that fit (`--null-fits reuse`). Without it (`--null-fits refit`) each simulation
+refits every gene once per target, the exact configuration, at about 1.7× the cost of a simulated
+pair-test. See [Methods](methods.md#null-model-fits).
 
 ---
 
@@ -155,6 +162,28 @@ model gives that cell, so the simulation and the test that judges it are on one 
 by the cell's poscounts factor — and exists only to compare against sweeps already run with it. It
 mixes two models, runs about 4 % low, and reproduces 86.5 % of the observed count variance against
 the fitted model's 99.5 %.
+
+---
+
+## 3b. `watteg-fit-null-models`
+
+```sh
+watteg-fit-null-models --prepared prepared/ --reps 100 --seed 20250812 --n-jobs 8 \
+    --out prepared/null_fits.h5
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--reps`, `--rep-offset` | required, 0 | Fits simulations offset+1 .. offset+reps. |
+| `--seed` | required | The simulation run's seed; recorded, and checked by the simulation. |
+| `--expression-model` | `fitted` | The simulation run's baseline; recorded and checked. |
+| `--pairs` | `pairs.tsv` in `--prepared` | Whose genes to fit. |
+| `--n-jobs` | 8 | Workers; one simulation's fits are one unit of work. |
+
+Pass the file to `watteg-run-power-simulation --null-fits reuse --null-fits-file`. A task given no
+file fits its own genes first with the same keyed draws, so the output is the same bytes either way;
+the file only saves refitting a gene in every task that tests it. Refused for a CRT screen, whose
+simulations the fast driver (the file's only reader) does not run.
 
 ---
 

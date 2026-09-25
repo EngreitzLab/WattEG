@@ -49,6 +49,8 @@ def simulate(
     permutations: str = "per-replicate",
     nulls: str = "scan",
     driver: str = "engine",
+    null_fits: str = "refit",
+    extra: tuple = (),
 ):
     subprocess.run(
         [
@@ -75,6 +77,9 @@ def simulate(
             nulls,
             "--driver",
             driver,
+            "--null-fits",
+            null_fits,
+            *extra,
             "--out",
             str(out),
         ],
@@ -201,3 +206,61 @@ def test_the_fast_driver_writes_the_engines_bytes(prepared, split, tmp_path):
             driver="fast",
         )
         assert engine.read_bytes() == fast.read_bytes()
+
+
+def test_reused_null_fits_are_the_same_from_a_file_or_made_in_the_task(prepared, split, tmp_path):
+    """--null-fits reuse: fits written by watteg-fit-null-models for more genes and simulations
+    than the task needs, and fits the task makes for itself at one worker and at two, give the
+    same file. A fit is keyed on (seed, gene, simulation) alone, so the layout cannot reach it."""
+    pairs = pd.read_csv(prepared / "pairs.tsv", sep="\t")
+    genes = list(pd.read_csv(split, sep="\t")["response_id"].unique())
+    others = [g for g in pairs["response_id"].unique() if g not in genes][:4]
+    wider = tmp_path / "wider.tsv"
+    pd.DataFrame({"grna_target": "x", "response_id": genes + others}).to_csv(
+        wider, sep="\t", index=False
+    )
+    fits = tmp_path / "fits.h5"
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "watteg.cli.fit_null_models",
+            "--prepared",
+            str(prepared),
+            "--pairs",
+            str(wider),
+            "--reps",
+            "5",
+            "--seed",
+            "7",
+            "--n-jobs",
+            "2",
+            "--out",
+            str(fits),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    reuse = dict(permutations="per-target", driver="fast", null_fits="reuse")
+    from_file = tmp_path / "file.tsv"
+    simulate(
+        prepared, from_file, split, reps=4, offset=0, **reuse, extra=("--null-fits-file", str(fits))
+    )
+    for n_jobs in (1, 2):
+        own = tmp_path / f"own_j{n_jobs}.tsv"
+        simulate(prepared, own, split, reps=4, offset=0, n_jobs=n_jobs, **reuse)
+        assert from_file.read_bytes() == own.read_bytes()
+
+    # And a file made under another seed is refused rather than used.
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        simulate(
+            prepared,
+            tmp_path / "wrong.tsv",
+            split,
+            reps=4,
+            offset=0,
+            seed=8,
+            **reuse,
+            extra=("--null-fits-file", str(fits)),
+        )
+    assert b"seed 7" in caught.value.stderr + caught.value.stdout

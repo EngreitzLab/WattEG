@@ -7,21 +7,22 @@
 // The DAG, and why it has the shape it has:
 //
 //   samplesheet -> PREPARE_SIM_INPUT -> SPLIT_PAIRS
-//                                            -> POWER_SIMULATION (split x effect size x rep chunk)
-//                                                 -> CONSOLIDATE_REPLICATES
-//                                                 -> COMPUTE_POWER -> SUMMARIZE_POWER
+//                        |                   -> POWER_SIMULATION (split x effect size x rep chunk)
+//                        +-> FIT_NULL_MODELS ---^   -> CONSOLIDATE_REPLICATES
+//                                                   -> COMPUTE_POWER -> SUMMARIZE_POWER
 //
-// FIT_NULL_MODELS and MERGE_NULL_MODELS used to hang off PREPARE_SIM_INPUT here. They existed
-// because R refitting a gene's null model inside every call cost 4.3x, so the fits were hoisted
-// into their own processes and injected. The Python path fits each gene's null on that replicate's
-// own simulated counts as a matter of course -- which is the faithful configuration that hoist was
-// built to approximate -- so both processes are gone, and with them reps_per_null_chunk,
-// test_max_null_reps and the divisibility check on them.
+// FIT_NULL_MODELS runs under --driver fast --null-fits reuse: each gene's null model is fitted once
+// per simulation, on an independent draw with no knockdown, and every simulation task reuses that
+// fit for every target the gene is tested with, instead of refitting it per target. It is R's old
+// FIT_NULL_MODELS approximation, rebuilt in Python and measured before it was adopted
+// (docs/pysceptre-backend.md, section 13, item 3c). --null-fits refit skips it and keeps the exact
+// per-target refit.
 
 nextflow.enable.dsl = 2
 
 include { PREPARE_SIM_INPUT } from './modules/local/prepare_sim_input'
 include { SPLIT_PAIRS       } from './modules/local/split_pairs'
+include { FIT_NULL_MODELS   } from './modules/local/fit_null_models'
 include { POWER_SIMULATION  } from './modules/local/power_simulation'
 include { CONSOLIDATE_REPLICATES } from './modules/local/consolidate_replicates'
 include { COMPUTE_POWER     } from './modules/local/compute_power'
@@ -63,6 +64,17 @@ workflow {
         error "num_replicates (${params.num_replicates}) must be a multiple of reps_per_chunk " +
               "(${params.reps_per_chunk}); otherwise the last chunk is short and the power " +
               "denominators differ between pairs."
+    }
+    // The fast driver shares one set of permutation matrices across a target's simulations, which
+    // is the engine's test only when they share one permutation set; reused fits are read only by
+    // the fast driver. Both combinations would fail every simulation task.
+    if (params.driver == 'fast' && params.permutations != 'per-target') {
+        error "driver 'fast' needs permutations 'per-target' (got '${params.permutations}'); " +
+              "set driver 'engine' to run per-replicate permutations."
+    }
+    if (params.null_fits == 'reuse' && params.driver != 'fast') {
+        error "null_fits 'reuse' needs driver 'fast'; the engine refits every gene itself. " +
+              "Set null_fits 'refit' with driver 'engine'."
     }
     // The gcb profile has no default container_image -- see conf/gcb.config for why -- so a run
     // that forgets --container_image would otherwise fail 5-30 minutes in, on the first task,
@@ -149,12 +161,25 @@ workflow {
     //
     // pairs_with_info is optional -- an export with no discovery_pairs_with_info produces none --
     // so it is mixed in with a default rather than joined, which would drop the sample entirely.
+    //
+    // The null-model fits: FIT_NULL_MODELS' file under null_fits 'reuse', an empty placeholder
+    // otherwise. The process is always wired, and fed nothing when it is not wanted, so there is
+    // one channel shape either way.
+    FIT_NULL_MODELS(PREPARE_SIM_INPUT.out.sim_input
+                        .join(PREPARE_SIM_INPUT.out.pairs)
+                        .join(PREPARE_SIM_INPUT.out.analysis_mode)
+                        .filter { params.null_fits == 'reuse' })
+    ch_null_fits = params.null_fits == 'reuse'
+        ? FIT_NULL_MODELS.out.fits
+        : PREPARE_SIM_INPUT.out.sim_input.map { meta, _sim_input -> [meta, []] }
+
     ch_sim_inputs = PREPARE_SIM_INPUT.out.sim_input
         .join(PREPARE_SIM_INPUT.out.grna_targets)
         .join(PREPARE_SIM_INPUT.out.analysis_mode)
         .join(PREPARE_SIM_INPUT.out.pairs_with_info, remainder: true)
         .map { meta, sim_input, grna_targets, analysis_mode, info ->
             [meta, sim_input, grna_targets, analysis_mode, info ?: []] }
+        .join(ch_null_fits)
 
     ch_rep_chunks = Channel
         .of(0..<(params.num_replicates.intdiv(params.reps_per_chunk)))
@@ -163,9 +188,9 @@ workflow {
     // combine on the meta key so a multi-sample run pairs each sample with its own splits rather
     // than with every sample's.
     // No trailing map: `combine` flattens the [offset, reps] pair into two elements rather than
-    // keeping it as one, so this already emits the nine fields POWER_SIMULATION declares --
-    // meta, sim_input, grna_targets, analysis_mode, pairs_with_info, split, effect_size,
-    // rep_offset, reps.
+    // keeping it as one, so this already emits the ten fields POWER_SIMULATION declares --
+    // meta, sim_input, grna_targets, analysis_mode, pairs_with_info, null_fits, split,
+    // effect_size, rep_offset, reps.
     ch_sim_tasks = ch_sim_inputs
         .combine(ch_splits, by: 0)
         .combine(Channel.fromList(params.effect_sizes))

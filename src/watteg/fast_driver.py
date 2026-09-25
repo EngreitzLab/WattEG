@@ -19,6 +19,12 @@ fit, the same IRLS and theta calls), and compute its pieces once. Per gene: pysc
 for beyond those comes from its own draw-matrix route, over the memoized matrices. So the p-value,
 the stage and every other column of the row are pysceptre's.
 
+**Fit reuse** (`null_fits`, `--null-fits reuse`) is the one departure from the engine's arithmetic,
+and it is explicit: each gene's fit on the simulation's counts is replaced by its fit on that
+simulation's null draw (`watteg.null_fits`), made once per (gene, simulation) and shared by every
+target and effect size. Everything else above is unchanged, so with `null_fits=None` the output is
+still the engine's, byte for byte.
+
 **Why each step is exact.** The permutations are the same rows: one generator from the same seed,
 consumed by the same `permutation_draws` call. The matrices come from pysceptre's own
 `draws_for_target` and `draws_to_matrix`, so they hold the same indices in the same order, and the
@@ -155,12 +161,19 @@ def simulate_target_fast(
     guide_spread_c: float = DEFAULT_GUIDE_SPREAD_C,
     expression_model: str = "fitted",
     stage2_columns: int = DEFAULT_STAGE2_COLUMNS,
+    null_fits=None,
 ) -> pd.DataFrame | None:
     """`engine.simulate_target(..., permutations="per-target", nulls="sparse")`, faster.
 
     Same arguments, same return value, byte for byte: one row per (pair, simulation), in the
     engine's order (simulation-major, then `genes`), with the same columns and dtypes. Returns None,
     with a warning, for a target that perturbs no cell.
+
+    `null_fits` (a `watteg.null_fits.NullFits` covering `genes` x `reps`) replaces each gene's fit
+    on the simulation's counts with its fit on that simulation's null draw (`--null-fits reuse`).
+    The test's score pieces still come from the simulation's own counts; only the coefficients and
+    theta change, so this is the one option here that is not the engine's arithmetic. None, the
+    default, refits as the engine does.
     """
     if params.resampling_mechanism != "permutations":
         # There is no CRT path here: the CRT draws per target from fitted probabilities, which this
@@ -217,7 +230,8 @@ def simulate_target_fast(
     draws = _SharedPermutationDraws(perms, n_trt, n_cells)
     stage1 = (0, B1)
     stage2 = (B1, B1 + B2)
-    xo = x_outer_flat(X)
+    # Only a refit reads the outer products (151 MB at 131,055 cells and 12 covariates).
+    xo = x_outer_flat(X) if null_fits is None else None
     dfr = n_cells - n_cov
     width = n_cov + 2
     # A repeated gene is fitted and tested on its LAST row, as pysceptre's dicts keyed by gene id
@@ -281,20 +295,26 @@ def simulate_target_fast(
         fits: dict[str, object] = {}
         for gene in unique_genes:
             row = gene_row[gene]
-            fit, theta, theta_est, method = _fit_gene(counts, row, X, xo, dfr)
             y = _discovery._get_row(counts, row)
-            pieces = compute_precomputation_pieces(y, X, fit.coefs[0], theta)
-            lo, hi = _discovery._THETA_BOUNDS
-            fits[gene] = _discovery.GenePrecomputation(
-                fitted_coefs=fit.coefs[0],
-                theta=theta,
-                theta_method=method,
-                theta_clamped=not (lo <= theta_est <= hi),
-                glm_converged=bool(fit.converged[0]),
-                min_eigenvalue=pieces.min_eigenvalue,
-                max_eigenvalue=pieces.max_eigenvalue,
-                n_covariates=pieces.D.shape[0],
-            )
+            if null_fits is None:
+                fit, theta, theta_est, method = _fit_gene(counts, row, X, xo, dfr)
+                pieces = compute_precomputation_pieces(y, X, fit.coefs[0], theta)
+                lo, hi = _discovery._THETA_BOUNDS
+                fits[gene] = _discovery.GenePrecomputation(
+                    fitted_coefs=fit.coefs[0],
+                    theta=theta,
+                    theta_method=method,
+                    theta_clamped=not (lo <= theta_est <= hi),
+                    glm_converged=bool(fit.converged[0]),
+                    min_eigenvalue=pieces.min_eigenvalue,
+                    max_eigenvalue=pieces.max_eigenvalue,
+                    n_covariates=pieces.D.shape[0],
+                )
+            else:
+                # The null draw's fit, applied to this simulation's counts: pysceptre's gene job
+                # does exactly this with the fit it is handed.
+                reused = null_fits.get(gene, rep)
+                pieces = compute_precomputation_pieces(y, X, reused.fitted_coefs, reused.theta)
 
             stacked = stack_pieces(pieces.a, pieces.w, pieces.D)
             known = {stage1: compute_null_statistics_from_draws(stacked, draws.slice(*stage1))}
@@ -309,8 +329,10 @@ def simulate_target_fast(
             del stacked
             if len(waiting) == stage2_columns:
                 multiply_waiting()
-        # One summary per simulation, as each of the engine's calls gives one.
-        _discovery._warn_about_degenerate_gene_fits(fits)
+        # One summary per simulation, as each of the engine's calls gives one. Reused fits were
+        # summarised where they were made.
+        if null_fits is None:
+            _discovery._warn_about_degenerate_gene_fits(fits)
     if waiting:
         multiply_waiting()
 

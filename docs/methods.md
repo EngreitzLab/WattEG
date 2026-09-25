@@ -200,6 +200,40 @@ At effect size 0 (the null arm) the same rule measures the rate of false calls *
 direction**. That is α for a left-sided test, but only about α/2 for a two-sided one, because half
 of the two-sided false calls have a positive fold change.
 
+## Null-model fits
+
+sceptre's test needs each gene's null model: the Poisson GLM on the covariates plus the
+negative-binomial theta, fitted to all cells. In the real screen each gene is fitted once and serves
+the ~135 targets it is paired with. A simulation can do the same or refit, and the two are options:
+
+- **`--null-fits reuse`** (R's `FIT_NULL_MODELS` approximation). Once per (gene, simulation), the
+  gene's counts are drawn with no knockdown, from their own stream keyed
+  `(seed, "__null_fit__|" + gene, simulation, 0)`, and pysceptre's own gene fit is run on them. Every
+  target the gene is tested with in that simulation, at every effect size, uses that fit; the score
+  and the permutations still come from the simulation's own counts. `FIT_NULL_MODELS` makes the fits
+  once per sample; a task given no file makes the same fits for its own genes.
+- **`--null-fits refit`**. Each simulation refits every gene on its own counts, once per target,
+  as sceptre would if the simulated screen were the real one.
+
+Reuse is not exact, and it does not need to be: a target perturbs a few hundred of 131,055 cells, so
+its knockdown barely moves a fit made on all of them. Measured on the moi5 reference targets with
+the same counts and permutations (cis: 12 pairs x 100 simulations; trans: 255 pairs x 10):
+
+| | refit | reuse | flips | McNemar p | largest per-pair change in power |
+|---|---:|---:|---:|---:|---:|
+| cis calls | 808 | 805 | 5 / 2 | 0.45 | 0.02 |
+| trans calls | 1,280 | 1,282 | 3 / 5 | 0.73 | 0.10 (one simulation of ten) |
+
+No pair moved by more than its own Wilson half-width, and p-values moved by a median of 0.04 in
+log10 (an earlier benchmark put that at a quarter of what a change of permutation seed does). On the
+fast driver the simulation's worker time fell 1.6-1.7x with the fits reused, the fit step excluded.
+
+A fit depends on (seed, gene, simulation) and nothing else — each gene's baseline and draw are made
+alone and pysceptre fits one gene at a time — so no result depends on which genes or targets share
+a task, and a file made by `watteg-fit-null-models` gives the same bytes as fits made in the task.
+The file records the seed, the baseline model and a digest of `sim_input.h5`, and a simulation run
+that does not match all three refuses it.
+
 ## Why control-cell sampling is not used
 
 **The flags are gone.** `n_control_cells` and `cell_batches` were removed with the Python port:

@@ -946,7 +946,30 @@ the same screen:
 same permutation set, the fast driver's p-values match the current engine's per pair, bit for bit
 where the operations are the same and to a stated tolerance where the fits are batched.
 
-#### 3c. Then: reuse each gene's null-model fit (decided 2026-09-25, after step 2 verifies)
+#### 3c. Then: reuse each gene's null-model fit (decided 2026-09-25) -- done
+
+**Done 2026-09-25** (`watteg.null_fits`, `watteg-fit-null-models`, the `FIT_NULL_MODELS` process,
+`--null-fits reuse | refit`, `--null-fits-file`). Checked:
+- `refit` is byte-identical to the fast driver before the option existed, on the cis reference
+  target (100 simulations, es 0 and 0.15), the trans reference target (10 simulations) and the
+  engine's per-replicate scan output.
+- The fits reproduce the benchmark's (`speed/hoist_null_fit/fits_cis.tsv`): 34 of 48 exactly, the
+  rest within 3e-15, the difference being the benchmark's many-gene baseline product.
+- A fit depends only on (gene, simulation): a gene fitted alone equals it fitted with others; a
+  file made for more genes and simulations, and fits made in the task at 1 and 2 workers, give the
+  same bytes (unit test and realdata test); a file from another seed is refused.
+- `reuse` against `refit`, same counts and permutations (per-target), on the fast driver:
+
+  | | refit calls | reuse calls | flips | McNemar p | max per-pair \|d power\| | beyond Wilson half-width |
+  |---|---:|---:|---:|---:|---:|---:|
+  | cis, 12 pairs x 100 | 808 | 805 | 5 / 2 | 0.45 | 0.02 | 0 of 12 |
+  | trans, 255 pairs x 10 | 1,280 | 1,282 | 3 / 5 | 0.73 | 0.10 | 0 of 255 |
+
+  Worker time at 8 workers, fit step excluded: cis 129.0 -> 74.2 s (1.74x), trans 236.5 -> 143.9 s
+  (1.64x), more than the benchmark's 1.24-1.29x because the fast driver removed the other overheads
+  the fit was averaged against. A task that fits its own genes pays the fits back (cis reference
+  target: 12.1 s of fits at 8 workers), so the saving on cis comes from `FIT_NULL_MODELS` fitting
+  each gene once per sweep.
 
 **Why.** The gene refit is the largest cost left after 3a and 3b: about 49 ms of every simulated
 pair-test, 27 % of today's cost. That is because each simulation refits every gene once per target.
