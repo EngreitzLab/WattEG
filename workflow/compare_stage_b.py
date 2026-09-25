@@ -59,14 +59,22 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("python_sim", type=Path, help="per-replicate output of the Python path")
+    parser.add_argument(
+        "python_sim", type=Path, help="per-replicate output of the Python path (.tsv or .parquet)"
+    )
     parser.add_argument("r_power", type=Path, help="a published power_es*.tsv")
     parser.add_argument("--threshold-file", type=Path, required=True)
     parser.add_argument("--power-threshold", type=float, default=0.8)
     args = parser.parse_args()
 
     threshold = float(args.threshold_file.read_text().split()[0])
-    py = compute_power(pd.read_csv(args.python_sim, sep="\t"), threshold)
+    # The pipeline publishes the replicates as one Parquet per effect size; a direct CLI run
+    # writes TSV. Either is the same table.
+    if args.python_sim.suffix == ".parquet":
+        sims = pd.read_parquet(args.python_sim)
+    else:
+        sims = pd.read_csv(args.python_sim, sep="\t")
+    py = compute_power(sims, threshold)
     r = pd.read_csv(args.r_power, sep="\t")
 
     merged = py.merge(r, on=KEY, suffixes=("_py", "_r"))

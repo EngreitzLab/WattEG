@@ -148,7 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     # --- everything else over cells_in_use -------------------------------------------------
     in_use = subset_to_cells_in_use(export)
     pairs = in_use.pairs
-    genes = [g for g in in_use.gene_ids if g in set(pairs["response_id"])]
+    # Built once. Inside the comprehension it was rebuilt for every gene -- 38,606 x 742,525 on
+    # moi5 trans, 108 min for a step that takes milliseconds, past the task's time limit.
+    paired = set(pairs["response_id"])
+    genes = [g for g in in_use.gene_ids if g in paired]
     print(f"  {len(pairs):,} QC-passing pairs across {pairs['grna_target'].nunique():,} targets")
     print(f"  genes kept: {len(genes)} of {len(in_use.gene_ids)} (those in QC-passing pairs)")
 
