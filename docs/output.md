@@ -24,6 +24,7 @@ One row per element–gene pair, one set of columns per effect size.
 | `min_detectable_effect_size_ci_low` | Optimistic edge, from `power_ci_high`. |
 | `min_detectable_effect_size_ci_high` | **Conservative edge, from `power_ci_low` — the column to use when interpreting a negative.** |
 | `max_effect_size_tested` | The largest effect size in the run, so `NA` above can be interpreted. |
+| `estimand` | `fixed` or `random`: which question the power answers ([Methods](methods.md), "What simulated power means"). `summarize_power.R` refuses power tables that disagree. Absent for sweeps run before the column existed. |
 
 `NA` in any of the three is a statement about the effect sizes you ran, **not** evidence that a pair
 is undetectable. If you tested 0.15 and 0.2 and a pair needs 0.4, it will be `NA`. That is why
@@ -145,6 +146,7 @@ measured power >= 0.8 for *every* tested pair, so element-wide negative claims a
 | `mean_pert_cells` | Mean perturbed cells. |
 | `average_expression_all_cells` | Raw mean expression. |
 | `effect_size` | The effect size simulated. |
+| `estimand` | `fixed` or `random`, carried from the simulations. `compute_power.R` refuses an input that mixes them. |
 
 ### What `power` actually counts
 
@@ -182,6 +184,7 @@ One row per (pair, simulation), gzipped. This is the only output from which powe
 | `log_2_fold_change` | Its effect estimate. Power counts a simulation only when `p_value` beats the discovery threshold **and** this is negative. |
 | `rep` | Simulation index, unique across chunks thanks to `--rep-offset`. |
 | `effect_size` | The effect size simulated. Constant within a file, and kept because `compute_power.R` uses it to refuse an input that mixes effect sizes. |
+| `estimand` | `fixed` (each gene's realised mean effect over the perturbed cells pinned to the effect size) or `random` (left where the guide draw puts it), from `--estimand`. Constant within a file. Nothing else in the file tells the two apart, so `consolidate_replicates.R`, `compute_power.R` and `summarize_power.R` all refuse to mix them. |
 | `num_pert_cells` | Perturbed cells for this target. |
 | `pass_qc`, `n_nonzero_trt`, `n_nonzero_cntrl` | Diagnostics, carried over from the **real** discovery pairs rather than recomputed from simulated data — they describe the observed experiment. |
 

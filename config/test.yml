@@ -29,6 +29,7 @@ effect_sizes:
 
 num_replicates: 2
 guide_spread_c: 0.65
+estimand: fixed
 seed: 20250812
 
 # Split as production does, then simulate only the first few, so the split geometry is identical to

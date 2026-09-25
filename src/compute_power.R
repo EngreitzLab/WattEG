@@ -144,7 +144,7 @@ read_one <- function(path) {
     }
     # Keys are stored as factors to keep the dictionary encoding stable; everything downstream
     # pastes and compares them as text.
-    for (column in c("grna_target", "response_id")) {
+    for (column in intersect(c("grna_target", "response_id", "estimand"), colnames(df))) {
       if (is.factor(df[[column]])) df[[column]] <- as.character(df[[column]])
     }
     df
@@ -242,6 +242,16 @@ if ("effect_size" %in% colnames(sims)) {
          "). Run compute_power.R once per effect size.", call. = FALSE)
   }
   power$effect_size <- effect_sizes
+}
+# Which question the power answers (fixed or random; docs/methods.md). Carried only when the
+# simulation recorded it: an older sweep without the column is not labelled after the fact.
+if ("estimand" %in% colnames(sims)) {
+  estimands <- unique(sims$estimand)
+  if (length(estimands) > 1) {
+    stop("The input mixes estimands (", paste(estimands, collapse = ", "),
+         "). Run compute_power.R once per estimand.", call. = FALSE)
+  }
+  power$estimand <- estimands
 }
 
 power <- power[order(-power$power, power$grna_target, power$response_id), ]

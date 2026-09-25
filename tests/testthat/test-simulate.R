@@ -242,9 +242,8 @@ test_that("simulate_effect_sizes pins each gene's realised mean to the requested
   }
 })
 
-test_that("centring in the wrong order is refused, and skipping it leaves the mean free to vary", {
+test_that("centring in the wrong order is refused, under either estimand", {
   fx <- fixture_target()
-  is_pert <- fx$pert_status == 1
   target <- c(g1 = 0.85)
 
   # The order every version ran until 2026-09-21, going back to the original DC-TAP code: centre
@@ -255,15 +254,85 @@ test_that("centring in the wrong order is refused, and skipping it leaves the me
   block_order <- create_effect_size_matrix(fx$status, fx$pert_guides, target, guide_spread_c = 0.65)
   expect_error(center_effect_size_matrix(block_order, fx$pert_status, target), "exactly 1")
 
-  # Without centring the realised mean wobbles from replicate to replicate by about
-  # the guides' sd * sqrt(sum n_g^2) / sum n_g -- that is the other estimand, random guide effects.
-  # Centring is what removes it.
-  set.seed(8)
-  uncentred <- replicate(200, {
-    m <- create_effect_size_matrix(fx$status, fx$pert_guides, target, guide_spread_c = 0.65)
-    mean(m[, fx$restore, drop = FALSE][1, is_pert])
-  })
-  expect_gt(sd(uncentred), 0.01)
+  # --estimand random has no pin to trip over, so the same check has to run on its own. Passing
+  # the identity permutation leaves the matrix in block order, as a caller that forgot the reorder
+  # would.
+  set.seed(7)
+  expect_error(simulate_effect_sizes(fx$status, fx$pert_status, seq_along(fx$cells),
+                                     fx$pert_guides, target, guide_spread_c = 0.65,
+                                     estimand = "random"),
+               "exactly 1")
+})
+
+## THE TWO ESTIMANDS (decided 2026-09-25; docs/methods.md, "What simulated power means") ===========
+
+test_that("under --estimand random the realised mean has the spread of a cell-weighted mean", {
+  # Each of the target's guides draws one knockdown with sd s = c * es * (1 - es), and a perturbed
+  # cell takes its guide's value. The realised mean over the perturbed cells is sum(n_g * x_g) / N,
+  # whose sd is s * sqrt(sum n_g^2) / N. The pin removes exactly this; skipping it must leave
+  # exactly this. The mean of the realised means stays on the requested effect: no bias.
+  fx <- fixture_target()
+  is_pert <- fx$pert_status == 1
+  n_g <- tabulate(fx$status[fx$restore][is_pert], nbins = length(fx$pert_guides))
+  n_sims <- 500
+  for (es in c(0.05, 0.15, 0.5)) {
+    target <- c(g1 = 1 - es, g2 = 1 - es, g3 = 1 - es)   # three independent genes per simulation
+    expected_sd <- 0.65 * es * (1 - es) * sqrt(sum(n_g^2)) / sum(n_g)
+    set.seed(26)
+    realised <- replicate(n_sims, {
+      m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                                 target, guide_spread_c = 0.65, estimand = "random")
+      expect_true(all(m[, !is_pert] == 1))
+      rowMeans(m[, is_pert, drop = FALSE])
+    })
+    # 1,500 realised means: the sd estimate's relative standard error is ~1.8 %, so 7 % is ~4 sigma.
+    expect_equal(sd(c(realised)), expected_sd, tolerance = 0.07)
+    expect_lt(abs(mean(realised) - (1 - es)), 4 * expected_sd / sqrt(length(realised)))
+  }
+})
+
+test_that("at effect size 0 the two estimands are identical, draw for draw", {
+  # A null element's guides do nothing under the Beta spread, so there is nothing to pin: the null
+  # is the same under both estimands. The RNG state afterwards must match too, since the counts are
+  # drawn from it next; identical matrices alone would not make the simulated counts identical.
+  fx <- fixture_target()
+  target <- c(g1 = 1, g2 = 1)
+  set.seed(27)
+  fixed <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                                 target, guide_spread_c = 0.65, estimand = "fixed")
+  seed_after_fixed <- .Random.seed
+  set.seed(27)
+  random <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                                  target, guide_spread_c = 0.65, estimand = "random")
+  expect_identical(random, fixed)
+  expect_identical(.Random.seed, seed_after_fixed)
+  expect_true(all(fixed == 1))
+})
+
+test_that("--estimand fixed is the pin applied to the very draw --estimand random returns", {
+  # What keeps fixed unchanged by the option's existence: it is still create -> reorder -> centre,
+  # on the same random numbers. The default is fixed, and the two share the RNG stream at every
+  # effect size, so the counts drawn afterwards differ only through the effects themselves.
+  fx <- fixture_target()
+  is_pert <- fx$pert_status == 1
+  target <- c(g1 = 0.85, g2 = 0.5)
+  set.seed(28)
+  default <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                                   target, guide_spread_c = 0.65)
+  seed_after_default <- .Random.seed
+  set.seed(28)
+  random <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                                  target, guide_spread_c = 0.65, estimand = "random")
+  expect_identical(.Random.seed, seed_after_default)
+  expect_identical(default, center_effect_size_matrix(random, fx$pert_status, target))
+  expect_false(isTRUE(all.equal(unname(rowMeans(random[, is_pert])), unname(target))))
+})
+
+test_that("an unknown estimand is refused", {
+  fx <- fixture_target()
+  expect_error(simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
+                                     c(g1 = 0.85), guide_spread_c = 0.65, estimand = "pinned"),
+               "should be one of")
 })
 
 test_that("the guide status is each cell's own guide, in cell order", {

@@ -9,9 +9,10 @@
 ##   - each cell keeps its own size factor and covariates: the original shuffled size factors
 ##     across cells, pairing one cell's perturbation status with another's library size;
 ##   - the expected counts are sceptre's own fitted model, exp(X . beta), not mean * size factor;
-##   - the realised mean effect over the perturbed cells is pinned to the requested one in every
-##     replicate (power at a fixed element effect). The original meant to, but centred before
-##     reordering and so shifted the wrong columns;
+##   - under the default --estimand fixed, the realised mean effect over the perturbed cells is
+##     pinned to the requested one in every simulation (power at a fixed element effect). The
+##     original meant to, but centred before reordering and so shifted the wrong columns. --estimand
+##     random leaves that mean where the guide draw puts it;
 ##   - guides that belong to anything else have an effect of exactly 1; the original gave them
 ##     N(1, 0.13), which double-counted noise already in the fitted dispersion;
 ##   - a target's guides have a spread that vanishes at no effect (Beta, sd c * es * (1 - es));
@@ -367,10 +368,11 @@ create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect
 
 #' Pin each gene's realised mean effect over the perturbed cells to the requested effect size.
 #'
-#' This is what makes the simulated power the power at a FIXED element effect (estimand A, decided
-#' 2026-09-24; see docs/methods.md): in every replicate, the cell-weighted mean effect across the
-#' perturbed cells equals the requested one. The guides still differ from each other within a
-#' replicate; only the replicate-to-replicate wobble of their mean is removed. It is not a
+#' This is what makes the simulated power the power at a FIXED element effect (`--estimand
+#' fixed`, the default, decided 2026-09-24; see docs/methods.md): in every simulation, the
+#' cell-weighted mean effect across the perturbed cells equals the requested one. The guides still
+#' differ from each other within a simulation; only the simulation-to-simulation wobble of their
+#' mean is removed. `--estimand random` skips this step and keeps that wobble. It is not a
 #' correction for clamping, which is what this docstring used to claim: at es 0.15 a guide clamps
 #' with probability ~3e-11.
 #'
@@ -384,22 +386,14 @@ create_effect_size_matrix <- function(grna_pert_status, pert_guides, gene_effect
 #' on a pin that exists.
 #'
 #' Control cells must already be exactly 1 (create_effect_size_matrix() guarantees it), so there is
-#' nothing to centre for them; this checks it rather than assuming it.
+#' nothing to centre for them; check_control_cells_are_one() checks it rather than assuming it.
 center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_sizes,
                                       tol = 1e-12) {
   # The check is for real failures (NaN, a logic error), not rounding, so its tolerance grows with
   # the number of perturbed cells the way summation error does. The mean is taken with mean(), which
   # is compensated, not rowMeans(), which on platforms without long double accumulates n * eps.
-  if (length(pert_status) != ncol(effect_size_mat)) {
-    stop("pert_status has ", length(pert_status), " entries but the effect-size matrix has ",
-         ncol(effect_size_mat), " cells.", call. = FALSE)
-  }
+  check_control_cells_are_one(effect_size_mat, pert_status)
   is_pert <- pert_status == 1
-
-  if (any(effect_size_mat[, !is_pert] != 1)) {
-    stop("Control cells must carry an effect of exactly 1; found other values. ",
-         "See create_effect_size_matrix().", call. = FALSE)
-  }
 
   if (any(is_pert)) {
     pert <- effect_size_mat[, is_pert, drop = FALSE]
@@ -415,6 +409,23 @@ center_effect_size_matrix <- function(effect_size_mat, pert_status, gene_effect_
     effect_size_mat[, is_pert] <- pert
   }
   effect_size_mat
+}
+
+#' Refuse an effect-size matrix whose control cells are not exactly 1, or whose width is wrong.
+#'
+#' Run under both estimands. Under `fixed` it guards the pin; under `random`, which has no pin, it
+#' is the only thing standing between a matrix still in perturbed-then-control order (the mask then
+#' calls perturbed cells "control") and a simulation that quietly moves the wrong cells.
+check_control_cells_are_one <- function(effect_size_mat, pert_status) {
+  if (length(pert_status) != ncol(effect_size_mat)) {
+    stop("pert_status has ", length(pert_status), " entries but the effect-size matrix has ",
+         ncol(effect_size_mat), " cells.", call. = FALSE)
+  }
+  if (any(effect_size_mat[, pert_status != 1] != 1)) {
+    stop("Control cells must carry an effect of exactly 1; found other values. ",
+         "See create_effect_size_matrix().", call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
 #' The values pmax(v + c, 0) whose mean is exactly `target`, for the one constant c that does it.
@@ -442,23 +453,44 @@ pin_to_mean <- function(v, target) {
   out
 }
 
-#' One replicate's effect-size matrix, in cell order, pinned to the requested effect.
+#' The estimands a simulation can target (docs/methods.md, "What simulated power means").
+ESTIMANDS <- c("fixed", "random")
+
+#' One simulation's effect-size matrix, in cell order.
 #'
 #' The only path from a guide status to the matrix draw_counts() consumes. It exists so that the
 #' simulation and its tests run the SAME sequence: the order of these steps is exactly what was
 #' wrong from the original DC-TAP code until 2026-09-21 (centring before the reorder shifted the
 #' wrong columns), and a test that re-implements the order by hand cannot catch a regression in it.
 #'
+#' `estimand` decides which question the simulated power answers (decided 2026-09-25):
+#'   - `fixed` (the default): each gene's realised mean over the perturbed cells is pinned to the
+#'     requested effect, so power is for an element whose effect IS es;
+#'   - `random`: the pin is skipped and that mean is left where the guide draw puts it, so power is
+#'     for an element whose effect is es ON AVERAGE. Its sd across simulations is
+#'     c * es * (1 - es) * sqrt(sum n_g^2) / sum n_g over the guides' perturbed-cell counts n_g.
+#' Both run the same draw: the pin consumes no random numbers, so under `random` the matrix is the
+#' `fixed` one before its per-gene shift, and everything drawn afterwards (the counts) takes the
+#' same stream. At es = 0 every guide effect is exactly 1, there is nothing to pin, and the two are
+#' identical. The control-cell check runs under both.
+#'
 #' @param grna_pert_status from create_guide_pert_status(), perturbed-then-control order
 #' @param pert_status 1/0 per cell, in cell order
 #' @param restore_cell_order order(cell_order(pert_status)), computed once per target
+#' @param estimand "fixed" or "random"
 #' @return genes x cells, in cell order
 simulate_effect_sizes <- function(grna_pert_status, pert_status, restore_cell_order,
-                                  pert_guides, gene_effect_sizes, guide_spread_c) {
+                                  pert_guides, gene_effect_sizes, guide_spread_c,
+                                  estimand = ESTIMANDS) {
+  estimand <- match.arg(estimand)
   es_mat <- create_effect_size_matrix(grna_pert_status, pert_guides = pert_guides,
                                       gene_effect_sizes = gene_effect_sizes,
                                       guide_spread_c = guide_spread_c)
   es_mat <- es_mat[, restore_cell_order, drop = FALSE]
+  if (estimand == "random") {
+    check_control_cells_are_one(es_mat, pert_status)
+    return(es_mat)
+  }
   center_effect_size_matrix(es_mat, pert_status = pert_status,
                             gene_effect_sizes = gene_effect_sizes)
 }

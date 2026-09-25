@@ -42,6 +42,16 @@ num_replicates: 100
 # three CRISPRi screens (docs/methods.md). Replaces guide_sd, which the pipeline now refuses.
 guide_spread_c: 0.65
 
+# Which question the power answers (docs/methods.md, "What simulated power means"):
+#   fixed   each gene's realised mean effect over the perturbed cells is pinned to the effect size
+#           in every simulation: power for an element whose effect IS es (PerturbPlan
+#           fold_change_sd = 0).
+#   random  that mean is left where the guide draw puts it: power for an element whose effect is
+#           es ON AVERAGE (PerturbPlan fold_change_sd = guide_spread_c * es * (1 - es)).
+# Identical at effect size 0. Every output records it in an `estimand` column. Give each estimand
+# its own outdir: the published file names do not include it.
+estimand: fixed
+
 # Parallelisation only; does not affect results. Seeds derive from
 # (seed, target, rep, effect_size), so output is invariant to the split layout.
 n_splits: 1000

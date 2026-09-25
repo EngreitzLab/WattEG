@@ -87,6 +87,10 @@ EFFECT_SIZES=(0.15)
 NUM_REPLICATES=100     # Monte-Carlo simulations per pair
 SEED=20250812          # base RNG seed
 GUIDE_SPREAD_C=0.65    # guide knockdown ~ Beta(mean es, sd c*es*(1-es)); docs/methods.md
+# fixed: each gene's realised mean over the perturbed cells pinned to es; random: es on average
+# (docs/methods.md). Both write to SIM_DIR, and step 04's provenance check redoes rather than reuses
+# an output made under the other one, so give a second estimand its own OUTDIR.
+ESTIMAND=fixed
 
 ## NULL MODELS (step 02b) =========================================================================
 #

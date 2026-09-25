@@ -116,6 +116,7 @@ Rscript src/run_power_simulation.R \
 | `--rep-offset` | `0` | Simulations already covered by earlier chunks; keeps the reported `rep` unique. |
 | `--seed` | required | Base seed. Required, not optional — see *Reproducibility* below. |
 | `--guide-spread-c` | `0.65` | Guide-to-guide spread: each guide's knockdown is Beta with mean es and sd c·es·(1−es), so zero at es = 0. Replaces `--guide-sd`, which is refused. See [Methods](methods.md). |
+| `--estimand` | `fixed` | Which question the power answers. `fixed`: each gene's realised mean effect over the perturbed cells is pinned to `--effect-size` in every simulation (power for an element whose effect *is* es; PerturbPlan `fold_change_sd = 0`). `random`: the pin is skipped (power for an element whose effect is es *on average*; PerturbPlan `fold_change_sd` = c·es·(1−es), 0.0829 at es 0.15). Identical at es = 0. Recorded in every output's `estimand` column; run each estimand into its own output directory. See [Methods](methods.md). |
 | `--n-control-cells` | unset | Sample this many controls instead of using all. **Biases power downward; leave unset.** |
 | `--cell-batches` | unset | Covariate column to stratify control sampling by. Only with `--n-control-cells`. |
 | `--gc-every` | `0` | Call `gc()` every N replicates. `0` disables it. |
@@ -154,8 +155,9 @@ Rscript src/compute_power.R \
 | `--alpha` | — | Explicit p-value threshold. Only for objects with no discovery results. |
 | `--conf-level` | `0.95` | Confidence level for the Wilson interval. |
 
-Run it once per effect size — it refuses input that mixes effect sizes, and refuses duplicated
-`(target, gene, replicate)` rows, which is what an overlapping `--rep-offset` would produce.
+Run it once per effect size and estimand — it refuses input that mixes effect sizes or estimands,
+and refuses duplicated `(target, gene, simulation)` rows, which is what an overlapping
+`--rep-offset` would produce.
 
 ## 5. `summarize_power.R`
 

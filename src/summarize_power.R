@@ -90,6 +90,26 @@ tables <- tables[ordering]
 effect_sizes <- effect_sizes[ordering]
 log_step("Merging ", length(tables), " effect size(s): ", paste(effect_sizes, collapse = ", "))
 
+# One estimand across every effect size (fixed or random; docs/methods.md). A summary whose columns
+# answer different questions would still look like one curve per pair. Tables from before the
+# column existed carry none, and are summarised as before.
+estimand_of <- function(df) {
+  if (!"estimand" %in% colnames(df)) return(NA_character_)
+  paste(sort(unique(as.character(df$estimand))), collapse = ", ")
+}
+estimands <- vapply(tables, estimand_of, character(1))
+estimand <- NULL
+if (!all(is.na(estimands))) {
+  if (anyNA(estimands) || length(unique(estimands)) != 1 || grepl(",", estimands[1])) {
+    stop("The power tables do not share one estimand (",
+         paste0(effect_sizes, ": ", ifelse(is.na(estimands), "none recorded", estimands),
+                collapse = "; "),
+         "). Summarise each estimand separately.", call. = FALSE)
+  }
+  estimand <- estimands[[1]]
+  log_step("Estimand: ", estimand)
+}
+
 
 ## MERGE ===========================================================================================
 
@@ -252,6 +272,7 @@ if (have_intervals) {
 }
 
 out$max_effect_size_tested <- max(effect_sizes)
+if (!is.null(estimand)) out$estimand <- estimand
 
 out <- out[order(out$min_detectable_effect_size, na.last = TRUE,
                  decreasing = FALSE), , drop = FALSE]

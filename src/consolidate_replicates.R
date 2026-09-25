@@ -94,6 +94,16 @@ if ("effect_size" %in% colnames(combined)) {
   }
 }
 
+# The same for the estimand (fixed or random): the two answer different questions, and nothing
+# else in the files tells them apart.
+if ("estimand" %in% colnames(combined)) {
+  estimands <- unique(combined$estimand)
+  if (length(estimands) > 1) {
+    stop("The inputs mix estimands (", paste(estimands, collapse = ", "),
+         "); consolidate one estimand at a time.", call. = FALSE)
+  }
+}
+
 if (anyDuplicated(combined[, c("grna_target", "response_id", "rep")])) {
   n_dup <- sum(duplicated(combined[, c("grna_target", "response_id", "rep")]))
   stop(n_dup, " duplicated (grna_target, response_id, rep) row(s): the inputs overlap.",
@@ -106,7 +116,8 @@ if (anyDuplicated(combined[, c("grna_target", "response_id", "rep")])) {
 # level set explicit keeps the encoding stable rather than dependent on row order, and `grna_target`
 # alone was 15.7 % of the TSV bytes because a ~21-character element name repeated once per
 # replicate. There are ~3,000 distinct values against 3.5 M rows.
-for (column in c("grna_target", "response_id")) {
+# `estimand` is one value repeated on every row, so it gets the same treatment.
+for (column in intersect(c("grna_target", "response_id", "estimand"), colnames(combined))) {
   combined[[column]] <- as.factor(combined[[column]])
 }
 

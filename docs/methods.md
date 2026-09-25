@@ -16,16 +16,52 @@ This conversion is the reason the column suffixes read `power_at_effect_size_15`
 
 ## What simulated power means
 
-**Power at a fixed element effect.** "Power at 15%" is the probability of detecting the pair when
-the element's guides produce **exactly** a 15% mean knockdown across the perturbed cells, in every
-simulated screen. The guides still differ from one another (next section); what is fixed is their
-cell-weighted mean. That is the effect sceptre's union test targets, since it pools every cell
+There are two estimands, chosen with `--estimand` / `estimand` (default `fixed`). Both draw the same
+guide knockdowns (next section). They differ in one step: whether the element's realised mean effect
+over its perturbed cells is pinned to the requested one.
+
+| | `fixed` (the default) | `random` |
+|---|---|---|
+| guide knockdown | Beta, mean es, sd `c * es * (1 - es)` | the same draw |
+| element's realised mean over its perturbed cells | pinned to es in every simulation | left where the draw puts it |
+| question answered | power for an element whose effect *is* es | power for an element whose effect is es *on average* |
+| PerturbPlan setting that asks the same | `fold_change_sd = 0` | `fold_change_sd = c * es * (1 - es)` (0.0829 at es 0.15) |
+
+Every output carries an `estimand` column: the per-simulation files, the per-effect-size power
+tables and `power_summary.tsv`. A power table therefore always says which question it answers.
+`consolidate_replicates.R`, `compute_power.R` and `summarize_power.R` refuse to mix the two.
+
+**`fixed`: power at a fixed element effect.** "Power at 15%" is the probability of detecting the
+pair when the element's guides produce **exactly** a 15% mean knockdown across the perturbed cells,
+in every simulated screen. The guides still differ from one another (next section); what is fixed is
+their cell-weighted mean. That is the effect sceptre's union test targets, since it pools every cell
 carrying any of the element's guides; power is a property of a test at a value of the parameter it
 targets. The match is close rather than exact: the test compares expected counts, which weight
 each cell by its own baseline, and the guides' spread around the pinned mean adds a little variance
 of its own. That spread is zero at effect size 0 (next section), so the null is exact.
 
-This was decided on 2026-09-24, and it is written down here because it was never written down
+**`random`: power at an element effect that is es on average.** The pin is skipped, and nothing else
+changes. The realised mean over the perturbed cells is then the cell-weighted mean of the guides'
+draws, `sum(n_g * x_g) / sum(n_g)`, where `n_g` is the number of perturbed cells carrying guide
+g. It is unbiased for es, and its sd across simulations is
+
+```
+c * es * (1 - es) * sqrt(sum(n_g^2)) / sum(n_g)
+```
+
+the sd of a cell-weighted mean of independent guide draws. On the shared test fixture (seven guides
+carried by 15-29 perturbed cells each) that is 0.38 times the per-guide spread, 0.032 at es 0.15.
+Power under `random` is the expected power over that spread.
+
+**Why `random` is safe now and was not before.** The unpinned spread is zero at es = 0. The old
+absolute `N(1 - es, 0.13)` gave a null element random effects, and "detected" it about 20% of the
+time on highly expressed genes. Under the Beta spread every guide effect at es = 0 is exactly 1, so
+there is nothing to pin, and the null is identical under both estimands. The pin also consumes no
+random numbers, so at any effect size the two estimands share every draw: the `fixed` effects are
+the `random` ones shifted, gene by gene, onto es (and clamped at zero where a strong knockdown needs
+it). One set of null-model fits serves both.
+
+`fixed` was decided on 2026-09-24, and it is written down here because it was never written down
 before, which cost several regenerations:
 
 - The original code (Sceptre_Power_Simulations, 2024, and the DC-TAP paper pipeline) called a
@@ -37,16 +73,18 @@ before, which cost several regenerations:
 - WattEG inherited the same order. On 2026-09-21 (`2b76284`) the reorder was moved before the
   centring. That fixed a real indexing bug and, with it, silently changed which quantity was
   simulated.
-- The alternative, random guide effects, is *expected* power averaged over a prior on the
-  knockdown. It is a different quantity, and as the draws are parameterised it does not even start
-  at α: at effect size 0 a target's guides still move expression, so a null element on a highly
-  expressed gene is "detected" around 20% of the time. If uncertainty about guide efficiency is
-  wanted, it belongs in a separately labelled output with a multiplicative efficiency model.
+- Random guide effects were set aside on 2026-09-24 because, as the draws were then parameterised,
+  they did not even start at α: at effect size 0 a target's guides still moved expression. That note
+  asked for any uncertainty about guide efficiency to come as a separately labelled output with a
+  multiplicative efficiency model. The Beta spread of 2026-09-25 is that model, and `--estimand
+  random`, recorded in the `estimand` column, is that output (added 2026-09-25).
 
-Two consequences to accept knowingly. WattEG does not reproduce the published DC-TAP per-pair power,
-which is the other quantity. And the guides' spread barely moves power at effect sizes up to 0.5,
-because spread around a pinned mean adds little variance to what the test sees: on moi5, no pair's
-power moves by more than 0.02 between the spread described below and no spread at all.
+Two consequences to accept knowingly. WattEG does not reproduce the published DC-TAP per-pair power:
+`fixed` is the other quantity, and `random` averages over the Beta spread rather than DC-TAP's
+absolute `N(1 - es, 0.13)`. And under `fixed` the guides' spread barely moves power at effect sizes
+up to 0.5, because spread around a pinned mean adds little variance to what the test sees: on moi5,
+no pair's power moves by more than 0.02 between the spread described below and no spread at all.
+How far `random` moves power from `fixed` has not yet been measured on moi5.
 
 ## Guide-to-guide variability
 
@@ -94,15 +132,16 @@ to the original DC-TAP code. That counted the noise twice: a gene with theta 146
 own simulated null data with theta 42, and power was understated for highly expressed,
 low-dispersion genes.
 
-**The perturbed cells' mean is then pinned** to the requested relative expression, gene by gene: the
-perturbed block is shifted so its row mean equals `1 - effect_size` exactly. This step is what makes
-the effect *fixed* (previous section). It is not a correction for clamping, which is what this page
-used to say. Because the draw's mean is already `1 - es`, the pin only removes one replicate's
-sampling wobble. At strong knockdowns a plain shift could push some guides below zero, so the shift
-is solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c` that puts the
-mean on the target, which always exists for an effect size below 1. (An earlier version shifted,
-clamped and repeated; once most cells clamp that converges slowly, and at effect size ≥ 0.99 it ran
-out of iterations and stopped the run on a pin that exists.)
+**Under `fixed`, the perturbed cells' mean is then pinned** to the requested relative expression,
+gene by gene: the perturbed block is shifted so its row mean equals `1 - effect_size` exactly. This
+step is what makes the effect *fixed* (previous section), and `random` skips it; the check that
+every control cell is exactly 1 runs under both. It is not a correction for clamping, which is what
+this page used to say. Because the draw's mean is already `1 - es`, the pin only removes one
+simulation's sampling wobble. At strong knockdowns a plain shift could push some guides below zero,
+so the shift is solved for exactly instead: the result is `max(v + c, 0)` for the one constant `c`
+that puts the mean on the target, which always exists for an effect size below 1. (An earlier
+version shifted, clamped and repeated; once most cells clamp that converges slowly, and at effect
+size ≥ 0.99 it ran out of iterations and stopped the run on a pin that exists.)
 
 A cell carrying no guide gets multiplier 1. A cell carrying several of the target's guides has one
 picked at random **once per target and effect size**, and it keeps that guide in every replicate.

@@ -107,7 +107,7 @@ provenance="${out}.provenance"
 # their null model -- see the long note in config.sh -- so the resume check below requires this
 # string to match as well, not just the line count.
 NULL_MODELS_MD5=$(md5sum "${NULL_MODELS}" | cut -d' ' -f1)
-want_provenance="config=${NULL_MODEL_CONFIG} null_models_md5=${NULL_MODELS_MD5} reps=${NUM_REPLICATES} seed=${SEED} guide_spread_c=${GUIDE_SPREAD_C} es=${ES}"
+want_provenance="config=${NULL_MODEL_CONFIG} null_models_md5=${NULL_MODELS_MD5} reps=${NUM_REPLICATES} seed=${SEED} guide_spread_c=${GUIDE_SPREAD_C} estimand=${ESTIMAND} es=${ES}"
 
 # Resume support. A task that already produced a complete output is skipped, so the array can be
 # resubmitted wholesale after a partial failure without redoing finished work.
@@ -159,6 +159,7 @@ pixi_run Rscript src/run_power_simulation.R \
   --reps "${NUM_REPLICATES}" \
   --rep-offset 0 \
   --guide-spread-c "${GUIDE_SPREAD_C}" \
+  --estimand "${ESTIMAND}" \
   --seed "${SEED}" \
   --out "${out}"
 

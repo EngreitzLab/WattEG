@@ -67,6 +67,13 @@ workflow {
               "pixi environment baked in -- see conf/gcb.config)."
     }
 
+    // Which question the power answers. Checked here rather than left to the first simulation
+    // task, which would otherwise be the first to notice a typo, after the null fits.
+    if (!(params.estimand in ['fixed', 'random'])) {
+        error "estimand must be 'fixed' or 'random' (got '${params.estimand}'); see " +
+              "docs/methods.md."
+    }
+
     // Sampled control cells are not wired through the pipeline: the path was never reachable from
     // it (prepare_sim_input.R does not declare these flags, and passing them there crashed the
     // step), it diverges from the all-cells path in ways that were never validated, and sampling

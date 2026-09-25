@@ -62,9 +62,11 @@ option_list <- list(
   make_option("--effect-size", type = "double", default = NULL, dest = "effect_size",
               help = paste("Effect size as a *fractional decrease* in expression, e.g. 0.15 for",
                            "a 15%% knockdown. Converted internally to a relative expression",
-                           "level of 1 - effect_size. Power is reported at a FIXED element",
-                           "effect: in every replicate the realised mean knockdown across the",
-                           "perturbed cells equals this value exactly (see docs/methods.md).")),
+                           "level of 1 - effect_size. Under --estimand fixed (the default) power",
+                           "is reported at a FIXED element effect: in every simulation the",
+                           "realised mean knockdown across the perturbed cells equals this value",
+                           "exactly. Under --estimand random it equals it on average (see",
+                           "docs/methods.md).")),
   make_option("--reps", type = "integer", default = NULL, dest = "reps",
               help = "Number of simulation reps to run in this chunk."),
   make_option("--rep-offset", type = "integer", default = 0L, dest = "rep_offset",
@@ -85,10 +87,20 @@ option_list <- list(
               help = paste("Guide-to-guide spread among the target's own guides: each guide's",
                            "knockdown is Beta with mean --effect-size and sd c * es * (1 - es)",
                            "[default %default, fitted to per-guide data from three CRISPRi",
-                           "screens]. Zero at es = 0; must be in [0, 2). The guides' mean is",
-                           "pinned to --effect-size, so this adds no uncertainty about the",
-                           "element's effect. Other guides have no effect on the tested genes.",
-                           "Replaces --guide-sd (an absolute sd of 0.13), which is refused.")),
+                           "screens]. Zero at es = 0; must be in [0, 2). Under --estimand fixed",
+                           "the guides' mean is pinned to --effect-size, so this adds no",
+                           "uncertainty about the element's effect; under --estimand random it",
+                           "does. Other guides have no effect on the tested genes. Replaces",
+                           "--guide-sd (an absolute sd of 0.13), which is refused.")),
+  make_option("--estimand", type = "character", default = "fixed", dest = "estimand",
+              help = paste("Which question the simulated power answers [default %default].",
+                           "'fixed': each gene's realised mean effect over the perturbed cells",
+                           "is pinned to --effect-size in every simulation, so power is for an",
+                           "element whose effect IS es. 'random': the pin is skipped and the",
+                           "mean is left where the guide draw puts it, so power is for an",
+                           "element whose effect is es ON AVERAGE (PerturbPlan's",
+                           "fold_change_sd = c * es * (1 - es)). Identical at es = 0. Written",
+                           "into the output's `estimand` column. See docs/methods.md.")),
   make_option("--guide-sd", type = "double", default = NULL, dest = "guide_sd",
               help = "Retired; use --guide-spread-c. Passing it is an error."),
   make_option("--n-control-cells", type = "integer", default = NULL, dest = "n_control_cells",
@@ -153,6 +165,10 @@ if (!is.null(opts$guide_sd)) {
 }
 if (!is.finite(opts$guide_spread_c) || opts$guide_spread_c < 0 || opts$guide_spread_c >= 2) {
   stop("--guide-spread-c must be in [0, 2) (got ", opts$guide_spread_c, ").", call. = FALSE)
+}
+if (!opts$estimand %in% ESTIMANDS) {
+  stop("--estimand must be one of ", paste0("'", ESTIMANDS, "'", collapse = ", "), " (got '",
+       opts$estimand, "').", call. = FALSE)
 }
 if (!opts$expression_model %in% c("fitted", "size_factor")) {
   stop("--expression-model must be 'fitted' or 'size_factor' (got ", opts$expression_model, ").",
@@ -251,6 +267,10 @@ targets <- unique(split_pairs$grna_target)
 log_step("Split covers ", length(targets), " targets / ", nrow(split_pairs), " pairs")
 log_step("Effect size ", opts$effect_size, " (relative expression ", relative_expression,
          "), reps ", opts$rep_offset + 1L, "-", opts$rep_offset + opts$reps)
+log_step("Estimand: ", opts$estimand,
+         if (opts$estimand == "fixed")
+           " (each gene's realised mean over the perturbed cells pinned to the effect size)" else
+           " (realised mean left where the guide draw puts it: the effect size on average)")
 log_step("Expression model: ", opts$expression_model,
          if (opts$expression_model == "size_factor")
            " (legacy: mixes two models and runs ~4% low -- see lib/simulate.R)" else
@@ -391,15 +411,17 @@ for (target in targets) {
     # See derive_seed() in lib/cli.R.
     set.seed(derive_seed(opts$seed, target, rep_id, opts$effect_size))
 
-    # One replicate's effect sizes, in cell order, with each gene's realised mean over the perturbed
-    # cells pinned to the requested effect: power at a FIXED element effect (estimand A, decided
-    # 2026-09-24 -- see docs/methods.md). simulate_effect_sizes() is the one place the
-    # create -> reorder -> centre order lives. Getting that order wrong is what made every version
-    # from the original DC-TAP code until 2026-09-21 compute something else: centring before the
-    # reorder shifted the wrong columns and left the realised mean free to vary.
+    # One simulation's effect sizes, in cell order. Under --estimand fixed (the default, decided
+    # 2026-09-24) each gene's realised mean over the perturbed cells is pinned to the requested
+    # effect: power at a FIXED element effect. Under --estimand random that mean is left where the
+    # guide draw puts it (decided 2026-09-25). See docs/methods.md. simulate_effect_sizes() is the
+    # one place the create -> reorder -> centre order lives. Getting that order wrong is what made
+    # every version from the original DC-TAP code until 2026-09-21 compute something else: centring
+    # before the reorder shifted the wrong columns and left the realised mean free to vary.
     es_mat <- simulate_effect_sizes(grna_pert_status, pert_status, restore_cell_order,
                                     pert_guides = pert_guides, gene_effect_sizes = effect_sizes,
-                                    guide_spread_c = opts$guide_spread_c)
+                                    guide_spread_c = opts$guide_spread_c,
+                                    estimand = opts$estimand)
 
     counts <- draw_counts(gene_object, es_mat, baseline)
 
@@ -442,6 +464,7 @@ for (target in targets) {
     discovery_result$num_pert_cells <- n_pert_cells
     discovery_result$rep <- rep_id
     discovery_result$effect_size <- opts$effect_size
+    discovery_result$estimand <- opts$estimand
 
     result_idx <- result_idx + 1L
     results[[result_idx]] <- discovery_result
@@ -482,10 +505,13 @@ combined <- do.call(rbind, results)
 #   effect_size                   compute_power.R refuses an input that mixes effect sizes, and that
 #                                 check reads this column. 3 % of the output for a guard against
 #                                 silently averaging power across knockdown levels
+#   estimand                      which question the power answers, fixed or random. Nothing
+#                                 else in the file says so, and consolidate_replicates.R,
+#                                 compute_power.R and summarize_power.R refuse a mix of the two
 #   pass_qc, n_nonzero_trt/cntrl  diagnostics. The first thing to look at when a pair's power is
 #                                 surprising, and there is nowhere else to recover them from
 keep <- c("grna_target", "response_id", "p_value", "log_2_fold_change", "rep", "effect_size",
-          "num_pert_cells", "pass_qc", "n_nonzero_trt", "n_nonzero_cntrl")
+          "estimand", "num_pert_cells", "pass_qc", "n_nonzero_trt", "n_nonzero_cntrl")
 present <- intersect(keep, colnames(combined))
 dropped <- setdiff(colnames(combined), present)
 if (length(dropped) > 0) {
