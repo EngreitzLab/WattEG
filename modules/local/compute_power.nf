@@ -32,12 +32,23 @@ process COMPUTE_POWER {
     # All three forms matched: the per-replicate output is gzipped, the consolidated one is
     # Parquet, and an older sweep being re-aggregated is plain .tsv. Missing the .gz here would
     # find no files and produce an empty power table rather than an error.
-    sim_list=\$(ls sim/*.parquet sim/*.tsv.gz sim/*.tsv 2>/dev/null)
-    echo "combining \$(echo "\${sim_list}" | wc -w) file(s)"
+    #
+    # nullglob, NOT `ls`. Only one of the three patterns ever matches, so `ls` exits 2 for the
+    # other two, and under Nextflow's `bash -e` that killed the task on this line with no output
+    # at all -- every real Python run, first seen on moi5 cis 2026-09-25. R's module escaped it
+    # only because it piped `ls` into `paste`, whose status is the one bash checks.
+    shopt -s nullglob
+    sim_list=(sim/*.parquet sim/*.tsv.gz sim/*.tsv)
+    shopt -u nullglob
+    echo "combining \${#sim_list[@]} file(s)"
+    if [ \${#sim_list[@]} -eq 0 ]; then
+        echo "ERROR: no simulation files staged under sim/" >&2
+        exit 1
+    fi
 
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         watteg-compute-power \\
-            --simulations \${sim_list} \\
+            --simulations "\${sim_list[@]}" \\
             --threshold-file ${threshold} \\
             --conf-level ${params.conf_level} \\
             --out power_es${effect_size}.tsv
