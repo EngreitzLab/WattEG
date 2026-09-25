@@ -1,151 +1,52 @@
 # Image for running WattEG on a cloud executor (the `gcb` profile).
 #
-# WHY THE ENVIRONMENT IS BAKED IN RATHER THAN SOLVED AT RUN TIME
+# - The environment is baked in: every task runs `pixi run --frozen ...`, and solving per task would
+#   repeat minutes of work thousands of times.
+# - /opt/pipeline is load-bearing: conf/gcb.config symlinks each task's ${projectDir} to it. Change
+#   it here and change it there.
+# - The pipeline is cloned at WATTEG_REF. ALWAYS pass a commit SHA; `main` makes the image silently
+#   non-reproducible. Rebuild whenever pixi.lock changes, including the pysceptre pin.
+# - pysceptre's scripts/ (sceptre_io.py, which watteg-prepare-sim-input and make_test_data import)
+#   is not shipped in its wheel, so it is fetched at the commit pinned in pixi.lock and put on
+#   PYTHONPATH. Without it every run fails at PREPARE_SIM_INPUT with "No module named sceptre_io".
+# - Keep this file under ~7 KB: Wave rejects a containerfile over 10,000 bytes base64-encoded.
 #
-# Every task runs `pixi run --frozen --manifest-path ${projectDir}/pixi.toml watteg-...`, so the
-# solved environment has to exist on disk before the first task starts. Solving it per task would
-# be minutes of work repeated thousands of times, and would need outbound network from every worker.
-#
-# It also cannot be reproduced from a conda specification alone, which rules out Wave's
-# conda-recipe mode: pysceptre is a git dependency pinned to a commit, and watteg itself is
-# installed from the tree. `pixi install --frozen` is what resolves both, so the image has to run
-# it at build time -- which is also why `git` is in the builder.
-#
-# WHY /opt/pipeline
-#
-# conf/gcb.config's beforeScript symlinks the task's ${projectDir} to /opt/pipeline. Google Batch
-# stages pipeline source into a per-task clone path that has nothing to do with where this image's
-# environment lives, so without that symlink `pixi run` finds a manifest with no environment beside
-# it and every task dies with "pixi: command not found". The path is therefore load-bearing: change
-# it here and change it there.
-#
-# BUILDING
-#
-# The pipeline is CLONED at a pinned ref rather than COPYed from a build context. Two reasons:
-#
-#   * Wave can then build it from the Dockerfile alone, with no context upload. The repository is
-#     public, so no credentials are involved.
-#   * The image records exactly which commit it contains. A context copy records nothing, and this
-#     image has to be rebuilt whenever pixi.lock changes -- being able to ask an image what it is
-#     matters more than saving a clone.
-#
-#   wave --containerfile containers/Dockerfile --await
-#   docker build --build-arg WATTEG_REF=<sha> -t <registry>/watteg:<tag> -f containers/Dockerfile .
-#
-# ALWAYS PASS A COMMIT SHA for anything but a throwaway build. The default is `main`, which makes
-# the image silently non-reproducible -- two builds a week apart would contain different pipelines.
-#
-# Wave's default (ephemeral) build expires roughly 24 hours after it completes, which is fine for a
-# one-off validation run and useless for anything citable. For a durable image add `--freeze` and a
-# `--build-repo` that Seqera has push credentials for; conf/gcb.config has the longer note.
-#
-# THE IMAGE MUST BE REBUILT WHENEVER pixi.lock CHANGES. There is no check that enforces this: a
-# stale image simply fails at the first task that needs the new package, with an ImportError naming
-# a missing module rather than anything about the image.
-#
-# That includes a change to the pysceptre pin. The engine is a git dependency pinned to a commit
-# precisely so a sweep can be re-run against the engine that produced it, and an image built before
-# the pin moved contains the older one.
-
-# ---- stage 1: build the environment --------------------------------------------------------
-#
-# MULTI-STAGE, because layer arithmetic is otherwise easy to get wrong. A `RUN rm -rf` in a later
-# layer records the deletion but the bytes still ship in the earlier one -- measured here, not
-# assumed: a single-stage version that pruned 1.7 GB in its own RUN produced an image byte-identical
-# in size to the unpruned one (2.14 GiB both ways, same 2,104 MiB layer, two extra no-op layers).
-#
-# With two stages the final image contains only what is COPYed, so anything the builder creates and
-# then removes cannot ship regardless of how the RUNs are arranged. That is a structural guarantee
-# rather than a discipline someone has to remember, and it is what actually worked -- compressed
-# sizes read off the registry manifest:
-#
-#   single stage, no prune      7 layers   2.14 GiB
-#   single stage, prune in RUN  9 layers   2.14 GiB   <- no effect whatsoever
-#   two stages                  6 layers   0.68 GiB   <- 3.1x smaller
-#
-# Those figures are the R image's and are kept because the STRUCTURAL point they establish still
-# holds; the Python environment is smaller, and the measurement has not been redone. The base is
-# not worth optimising either way: debian:bookworm-slim measures 26.9 MiB against ubuntu's 28.4
-# MiB, and swapping a validated base for 0.2% is a bad trade.
+#   wave --containerfile containers/Dockerfile --build-arg WATTEG_REF=<sha> --await
 
 FROM ubuntu:22.04 AS builder
-
 ENV DEBIAN_FRONTEND=noninteractive
-
-# ca-certificates is not optional: a stock ubuntu:22.04 ships none at all, so every HTTPS call --
-# pixi fetching packages, install_sceptre.R fetching a tarball from GitHub -- dies with
-# "No CA certificates were loaded from the system".
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl bzip2 git \
     && rm -rf /var/lib/apt/lists/*
-
-# Pinned rather than latest. pixi reads the lockfile format, and an older pixi cannot read a newer
-# one -- the module system's 0.53.0 fails outright on this repo's format-v7 lock. Pinning keeps the
-# image reproducible and matches what Sherlock runs.
 ARG PIXI_VERSION=0.76.2
 RUN curl -fsSL https://pixi.sh/install.sh | PIXI_VERSION="v${PIXI_VERSION}" PIXI_NO_PATH_UPDATE=1 bash
 ENV PATH="/root/.pixi/bin:${PATH}"
-
-# Pin this to a commit SHA for any build whose output matters. `main` is a moving target.
 ARG WATTEG_REF=main
 RUN git clone https://github.com/EngreitzLab/WattEG.git /opt/pipeline \
     && cd /opt/pipeline \
     && git checkout "${WATTEG_REF}" \
     && git rev-parse HEAD > /opt/pipeline/.image-built-from
-
 WORKDIR /opt/pipeline
-
-# Mirrors workflow/slurm_executor/00_setup_env.sbatch, deliberately: the two ways of building this
-# environment must not drift, or a cloud run and a Sherlock run stop being comparable.
-#
-#   --frozen  use pixi.lock as committed, never re-solve. A worker silently re-solving would defeat
-#             the lockfile and would need network it may not have.
-#
-# There is no longer a build environment, a `setup` task or a `check-api` task. Those existed to
-# compile sceptre from a pinned commit with a local patch, and ondisc from another, and then to
-# verify the pin against the unexported S4 slots the pipeline read. The Python path compiles
-# nothing and reaches into nothing, so `pixi install --frozen` is the whole build.
 RUN pixi install --frozen
-
-# The caches are dropped before the copy rather than after: see the multi-stage note above for why
-# a later `rm` would not actually make the image smaller.
+RUN rev=$(grep -o 'pysceptre.git?tag=[^#]*#[0-9a-f]*' pixi.lock | head -1 | sed 's/.*#//') \
+    && test -n "${rev}" \
+    && git clone https://github.com/broadinstitute/pysceptre.git /opt/pysceptre \
+    && git -C /opt/pysceptre checkout "${rev}"
 RUN rm -rf /root/.cache/rattler /root/.cache/pixi /root/.cache/uv /root/.pixi/cache
 
-# ---- stage 2: the runtime image ------------------------------------------------------------
-#
-# Same base as the builder, and the SAME PATHS. Conda environments embed absolute paths, so
-# /opt/pipeline has to be /opt/pipeline in both stages or the copied environment will not activate.
-#
-# conf/gcb.config's beforeScript symlinks the task's ${projectDir} here. Google Batch stages
-# pipeline source into a per-task clone path unrelated to where this image's environment lives, so
-# without that symlink `pixi run` finds a manifest with no environment beside it and every task dies
-# with "pixi: command not found". The path is load-bearing: change it here and change it there.
-
 FROM ubuntu:22.04
-
 ENV DEBIAN_FRONTEND=noninteractive
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-
-# The pixi binary comes too: every process script invokes `pixi run --frozen --manifest-path ...`
-# itself, so the runtime needs pixi even though the environment is already solved. That is why the
-# shell-hook/entrypoint form of this pattern does not apply -- Nextflow calls pixi, not the image.
 COPY --from=builder /root/.pixi/bin/pixi /root/.pixi/bin/pixi
 COPY --from=builder /opt/pipeline /opt/pipeline
-
+COPY --from=builder /opt/pysceptre/scripts /opt/pysceptre-scripts
 ENV PATH="/root/.pixi/bin:${PATH}"
+ENV PYTHONPATH=/opt/pysceptre-scripts
 WORKDIR /opt/pipeline
-
-# Prove the runtime image works on its own terms, so a copy that missed something fails the BUILD
-# rather than the first task of a several-thousand-task sweep. Importing watteg is not enough --
-# it would pass with pysceptre absent -- so this exercises the engine's entry point and the one
-# console script every run begins with.
-RUN pixi run --frozen python -c "import watteg, pysceptre; from pysceptre.pipeline.discovery import run_discovery_ntcells_complement; print('watteg', watteg.__version__)" \
+RUN pixi run --frozen python -c "import watteg, pysceptre, sceptre_io; from pysceptre.pipeline.discovery import run_discovery_ntcells_complement; print('watteg', watteg.__version__)" \
     && pixi run --frozen watteg-prepare-sim-input --help > /dev/null \
     && echo "built from $(cat /opt/pipeline/.image-built-from)"
-
 ENV WATTEG_ROOT=/opt/pipeline
-
 CMD ["/bin/bash"]
