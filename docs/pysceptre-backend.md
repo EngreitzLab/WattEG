@@ -913,23 +913,28 @@ cloud against 0.55 s today. The measurements decide whether items 3-4 reach it.
 ### 6. Re-check the guide spread, value and form (not yet run)
 
 The spread behind 0.0829 at es 0.15 is `c * es * (1 - es)` with c = 0.65 (`methods.md`,
-"Guide-to-guide variability"). `methods.md` says sampling noise was removed for the null pairs
-(spread 0.004-0.014). It does not say the same for the enhancer bins that fixed the form and c
-(0.015 / 0.056 / 0.105 / 0.144 / 0.108 at es 0.03 / 0.10 / 0.21 / 0.37 / 0.59). Each guide's
-knockdown is estimated from its own cells, a few dozen per guide, so if the bins were not corrected
-their spread includes estimation noise, and c overstates the true between-guide spread.
+"Guide-to-guide variability").
 
-To do, on the same three screens (DC-TAP K562, DC-TAP WTC11, moi5), before anything else depends
-on 0.65:
-- **Confirm the correction.** Check whether the bins subtracted each guide's sampling variance,
-  from the fitting scripts under the 2026-09-25 working files (`guide_spread/`).
-- **Refit both the value and the form** with that noise removed:
-  - c, per screen and pooled;
-  - the chi-square of `c * es * (1 - es)` against the absolute and constant-CV forms.
-- **Carry through the downstream numbers that would change if c moves:**
+**Settled by the 2026-09-25 data audit** (WattEG-paper `analysis/guide_spread/build_data.R`):
+- **The enhancer bins were noise-corrected, like the null pairs.** Each pair's spread is
+  `tau2 = var(fc) - cf_t * mean(se^2)`, where `cf_t` is calibrated on groups of 14 non-targeting
+  guides per expression tertile (`guide_spread_v2.R:97`, `:78-84`), and the bins pool `tau2`.
+  `methods.md` did not say so, and should.
+- **The curve runs high at large effects.** It peaks at es 0.5 (sd 0.163), while the pooled bins
+  peak near es 0.37 (0.144) and fall to 0.108 at 0.59. The c that best fits the bins is 0.593,
+  against the 0.65 fitted per pair.
+
+**Still to do, before anything else depends on 0.65:**
+- **Is the calibration adequate?** `cf_t` comes from non-targeting guide groups. Check it against
+  held-out non-targeting groups and against the null elements, per screen.
+- **Refit both the value and the form:**
+  - reconcile the per-pair fit (0.65) with the bin fit (0.593);
+  - test whether a form that falls faster at large effects fits better than `c * es * (1 - es)`.
+- **Carry any change through:**
   - the default `guide_spread_c`;
   - the PerturbPlan setting matched to the random estimand (item 1);
-  - the 0.0829 in WattEG-paper `docs/perturbplan_comparison.md` and `paper/06_prediction.md`.
+  - the 0.0829 in WattEG-paper `docs/perturbplan_comparison.md`, `paper/06_prediction.md`, and the
+    figure `figures/guide_spread/guide_spread.png`.
 
 Under the fixed estimand the stakes are small: no moi5 pair's power moves by more than 0.02 between
 this spread and none. Under the random estimand, and in the PerturbPlan comparison, the value
