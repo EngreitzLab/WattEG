@@ -874,7 +874,46 @@ as did the real screen. A per-target draw from the run's seed was chosen over sc
 so that one draw is not shared by every target of the same size. Outputs change relative to earlier
 Python runs; that is expected and is recorded in `methods.md`.
 
-### 3. A faster driver (pending measurement)
+### 3. A faster driver
+
+#### 3a. First: take pysceptre's sparse route for the permutation nulls (measured, bit-identical)
+
+**The problem.** In a one-target call pysceptre computes the stage-1 and stage-2 permutation nulls
+by a scan: it gathers a (B, n_trt, 14) array (227 MB at stage 2, n_trt = 406) and takes a running
+sum over it, to read a single column (`PermutationPrefixSums`, `score_stat.py:411-441`). The scan
+exists to serve many targets of different sizes from one set of draws. With one target it is pure
+waste. pysceptre already has the alternative, a sparse indicator matrix times the gene's pieces
+(`draws_to_matrix(...) @ stacked`, `score_stat.py:82-115, 274-300`). It uses that route whenever
+the scan would exceed its memory limit, and the real moi5 screen takes it at stage 2 on its own,
+because its largest target (607 cells) is above the limit (457).
+
+**Measured** (2026-09-25, single-core laptop, `speed/timing_decomposition/`). The route was switched
+by making the scan decline at runtime, so pysceptre ran its own sparse code:
+
+| | today | sparse route | |
+|---|---|---|---|
+| stage-2 null, per escalated pair | 119.5 ms | 17.7 ms (4.0 build + 13.6 multiply) | |
+| stage-1 null, per pair | 12.4 ms | 1.9 ms | |
+| **cis**, per simulated pair-test (12 pairs x 100 simulations) | 182 ms | 87 ms | **2.1x** |
+| **trans**, per simulated pair-test (255 pairs x 10 simulations) | 154 ms | 66 ms | **2.3x** |
+
+p-values, z-statistics and stages were identical on all 1,200 cis and 2,550 trans pair-tests,
+max |dp| = 0.
+
+**Implementation.** Two steps, in order:
+1. **Now, in the current engine.** Steer pysceptre onto the sparse route with a scoped, documented
+   runtime setting in `watteg.engine` (the scan's decline threshold), leaving pysceptre's source
+   untouched. It needs a test that p-values equal the scan route's on the shared fixture and on
+   one real target. This alone halves the cost of every sweep.
+2. **Then, in the faster driver.** Build the sparse matrix once per target and stage and apply it
+   to every gene x simulation of that target in one product (the table below). With one
+   permutation set per target (item 2) the matrix is shared across simulations, and the build cost
+   (4.0 ms per pair-test today) disappears too.
+
+If pysceptre's owners want it, the same finding applies upstream: for a single target, the scan is
+slower than the sparse route at every stage. That is a note for them, not a change made here.
+
+#### 3b. The rest of the driver
 
 A read-only map of pysceptre's discovery call found work that is repeated for no reason in the
 simulation's call shape (one target, one replicate per call). All of it is avoidable without
@@ -885,10 +924,25 @@ editing pysceptre, by driving its public low-level functions (`fit_all_genes`,
 | work today | cost (laptop, cis profile) | replacement |
 |---|---|---|
 | all 30,497 permutations drawn per call, one `rng.choice` at a time | ~0.24 s per call | drawn once per target (item 2) |
-| stage-2 null: gather + cumsum over a (4,999, n_trt, 14) array to read one column | ~125 ms per escalated pair | one sparse permutation matrix per target and stage, `P @ [stacked_1 | ... | stacked_K]` for every gene x replicate at once; bit-identical per column (checked) |
+| stage-1 and stage-2 nulls on the scan route | 119.5 / 12.4 ms (measured, 3a) | 3a first; then one sparse matrix per target and stage, `P @ [stacked_1 | ... | stacked_K]` for every gene x simulation at once; bit-identical per column (checked) |
 | gene fits one replicate at a time, plus a duplicated `compute_precomputation_pieces` | ~44 + 5 ms per gene per replicate | fits batched across a target's replicates; not guaranteed bit-identical on Linux, so checked to tolerance |
 
-Estimated effect: ~180 ms to ~35 ms per escalated pair-replicate. **Exactness criterion:** on the
+Measured breakdown of today's 182 ms per cis pair-test, against 1.2 ms in the real discovery of
+the same screen:
+
+| cause | ms | share | fix |
+|---|---|---|---|
+| scan route, stage 2 | 83.5 | 46 % | 3a |
+| gene refits | 49.3 | 27 % | batching across simulations, or R-style fit reuse |
+| per-call overhead (draws) | 19.6 | 11 % | draws once per target |
+| escalation rate (82 % of simulated pair-tests vs 3.3 % real) | 15.3 | 8 % | none: the cutoffs are below 1/500, so a callable pair must reach stage 2 |
+| scan route, stage 1 | 10.5 | 6 % | 3a |
+
+- **R-style fit reuse, measured:** 1.24x on cis and 1.27-1.29x on trans. The call rate is
+  identical on cis (806 of 1,200), 8 pair-tests flip 4 each way, and p-values move a quarter as
+  much as a change of permutation seed does.
+- **Estimated with everything combined:** about 25 ms per pair-test with fit reuse, or about 35-40
+  ms with batched exact fits. **Exactness criterion:** on the
 same permutation set, the fast driver's p-values match the current engine's per pair, bit for bit
 where the operations are the same and to a stated tolerance where the fits are batched.
 
@@ -897,7 +951,7 @@ where the operations are the same and to a stated tolerance where the fits are b
 - **A task holds whole targets with all their replicates,** and writes per-pair power directly. The
   74M-row consolidation and power steps become optional, kept only for a per-replicate table when
   asked for.
-- **8 workers per task** (`a85188a`, unpushed): cis tasks fit in 8 GB. trans at 4 workers
+- **8 workers per task** (`a85188a`, pushed): cis tasks fit in 8 GB. trans at 4 workers
   averaged ~7.4 GB per task, so trans memory is set from a measurement with the fast driver, not
   from the discovery benchmark.
 - **Task sizing:** roughly 15-20 min at 8 workers, within the 10,000 preemptible-CPU quota.
