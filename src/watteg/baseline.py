@@ -12,8 +12,8 @@ scale by construction rather than by coincidence.
 2026-09-21 -- a size-factor-normalised gene mean scaled by the cell's DESeq2
 "poscounts" factor. Kept because the sweeps already run were produced with it,
 and a comparison against one of those is only interpretable like for like. It is
-not what R does now: `r-implementation` defaults to the fitted baseline too. It is a validation fixture,
-not a modelling choice anyone should make afresh.
+not what R does now: `r-implementation` defaults to the fitted baseline too. It is a
+validation fixture, not a modelling choice anyone should make afresh.
 
 ## Why the default changed
 

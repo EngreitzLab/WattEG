@@ -24,6 +24,7 @@ test it is emulating does not.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
@@ -91,16 +92,21 @@ def fit_gene_models(
         n_jobs=n_jobs,
     )
 
-    # A clamped theta is a fit that did not converge to anything usable, and a
-    # dispersion of 100 or 0.001 would simulate a gene nothing like the real
-    # one. R had no equivalent check because it read a cache that sceptre had
-    # already produced; here the fit happens in front of us, so it is checked.
+    # A theta clamped to the estimator's bounds [0.01, 1000] is kept, with a
+    # warning. This used to raise, which stopped moi5 cis at PREPARE_SIM_INPUT on
+    # a single gene (ENSG00000186409, mean 0.0085 counts per cell, theta at 0.01)
+    # and would have dropped its pairs from the Python sweep while R kept them.
+    # Keeping it is right for three reasons: sceptre's cache holds the same
+    # clamped value, so R simulates from it; sceptre's own test uses it in its
+    # null model, so the simulation stays on the test's model; and a gene that
+    # sparse has essentially no power whatever its theta. Changing the pair set
+    # is not this step's call -- the pairs are the screen's QC-passing pairs.
     clamped = [g for g in genes if fits[g].theta_clamped]
     if clamped:
-        raise ValueError(
-            f"{len(clamped)} gene(s) have a theta clamped to the estimator's bounds, including: "
-            f"{clamped[:5]}. Their dispersion is not an estimate, and simulating from it would "
-            "misstate the noise. Drop these genes from the discovery pairs."
+        warnings.warn(
+            f"{len(clamped)} gene(s) have a theta clamped to the estimator's bounds, kept at the "
+            f"bound as sceptre keeps them: {clamped[:5]}",
+            stacklevel=2,
         )
     nonfinite = [g for g in genes if not np.isfinite(fits[g].theta) or fits[g].theta <= 0]
     if nonfinite:

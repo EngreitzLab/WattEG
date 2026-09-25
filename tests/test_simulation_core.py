@@ -477,3 +477,29 @@ def test_the_draw_rejects_inputs_that_do_not_line_up():
         draw_counts(np.ones((2, 5)), np.ones((2, 5)), np.array([1.0]), rng)
     with pytest.raises(ValueError, match="finite and positive"):
         draw_counts(np.ones((2, 5)), np.ones((2, 5)), np.array([1.0, 0.0]), rng)
+
+
+# --- the screen's own test configuration -------------------------------------------------
+
+
+def test_the_screens_resampling_mechanism_is_passed_through(tmp_path):
+    """Both moi5 screens ran sceptre's permutation test. The engine used to refuse
+    anything but the CRT; it now re-runs whichever the screen ran."""
+    from watteg.engine import AnalysisParams
+
+    def mode(mechanism, moi="high"):
+        f = tmp_path / f"{mechanism}_{moi}.tsv"
+        f.write_text(
+            f"resampling_mechanism\t{mechanism}\nmoi\t{moi}\nside\tleft\n"
+            "B1\t499\nB2\t4999\nB3\t24999\n"
+        )
+        return f
+
+    params = AnalysisParams.from_analysis_mode(mode("permutations"))
+    assert params.resampling_mechanism == "permutations"
+    assert (params.B1, params.B2, params.B3, params.side_code) == (499, 4999, 24999, -1)
+    assert AnalysisParams.from_analysis_mode(mode("crt")).resampling_mechanism == "crt"
+    with pytest.raises(ValueError, match="covers 'crt' and 'permutations'"):
+        AnalysisParams.from_analysis_mode(mode("something_else"))
+    with pytest.raises(ValueError, match="low MOI"):
+        AnalysisParams.from_analysis_mode(mode("crt", moi="low"))

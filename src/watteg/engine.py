@@ -47,15 +47,22 @@ class AnalysisParams:
     B2: int
     B3: int
     side_code: int
+    resampling_mechanism: str = "crt"
 
     @classmethod
     def from_analysis_mode(cls, path) -> AnalysisParams:
         text = Path(path).read_text()
         mode = dict(line.split("\t", 1) for line in text.splitlines() if "\t" in line)
-        if mode.get("resampling_mechanism") != "crt":
+        # The screen's own resampling mechanism is passed through, so the simulation re-runs
+        # the test the screen actually ran. Until 2026-09-25 this refused anything but the CRT,
+        # which ruled out both moi5 screens (sceptre's permutation test). pysceptre implements
+        # permutations, but its own docs call them exercised rather than validated against R,
+        # so a permutation sweep here leans on the R-vs-Python comparison (Stage B) for that.
+        mechanism = mode.get("resampling_mechanism")
+        if mechanism not in ("crt", "permutations"):
             raise ValueError(
-                f"this screen used {mode.get('resampling_mechanism')!r}, and the Python path "
-                "covers the CRT only. Run it through the R implementation."
+                f"this screen used resampling_mechanism {mechanism!r}; the Python path covers "
+                "'crt' and 'permutations'. Run it through the R implementation."
             )
         if mode.get("moi") == "low":
             raise ValueError(
@@ -67,6 +74,7 @@ class AnalysisParams:
             B2=int(mode["B2"]),
             B3=int(mode["B3"]),
             side_code={"left": -1, "both": 0, "right": 1}[mode["side"]],
+            resampling_mechanism=mechanism,
         )
 
 
@@ -147,6 +155,7 @@ def simulate_target(
             B2=params.B2,
             B3=params.B3,
             side_code=params.side_code,
+            resampling_mechanism=params.resampling_mechanism,
             seed=int(rng.integers(0, 2**31 - 1)),
             n_jobs=n_jobs,
             # Stated rather than left to be discovered. Each call carries exactly one target, so

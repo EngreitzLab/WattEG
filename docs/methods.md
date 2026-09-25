@@ -150,10 +150,12 @@ implementation stored dispersions in a list column with `NULL` holes; `unlist()`
 shortening the vector, and the negative-binomial draw recycled it — so every gene after the first
 gap was simulated with another gene's dispersion, with no warning.
 
-A theta clamped to the estimator's bounds is **refused**. sceptre clamps to `[0.01, 1000]` and
-carries on, which is reasonable for an analysis; for a simulation a clamped theta is not an
-estimate of anything, and drawing counts from it would state a noise level the data never
-supported.
+A theta clamped to the estimator's bounds `[0.01, 1000]` is **kept at the bound, with a
+warning**, as sceptre keeps it. It used to be refused. That stopped the moi5 cis sweep on one gene
+(mean 0.0085 counts per cell, theta at 0.01), and it would have dropped that gene's pairs while
+the R implementation kept them. sceptre's own test uses the same clamped value in its null model,
+so simulating from it keeps the simulation on the test's model. A gene that sparse has essentially
+no power at any theta.
 
 ## Deciding whether a simulation "detects" the pair
 
