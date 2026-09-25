@@ -23,7 +23,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from watteg.engine import DEFAULT_GUIDE_SPREAD_C, AnalysisParams, simulate_target
+from watteg.engine import (
+    DEFAULT_GUIDE_SPREAD_C,
+    PERMUTATION_MODES,
+    AnalysisParams,
+    simulate_target,
+)
 from watteg.sim_input import read_sim_input
 
 # What a reader needs, and nothing more. At 100 replicates x 34,886 pairs x six
@@ -76,6 +81,7 @@ def _run_unit(unit: tuple) -> tuple:
         guide_spread_c=shared["guide_spread_c"],
         n_jobs=1,
         expression_model=shared["expression_model"],
+        permutations=shared["permutations"],
     )
     return target, frame, time.perf_counter() - at
 
@@ -184,6 +190,14 @@ def main(argv: list[str] | None = None) -> int:
         "targets with a handful of genes still keep every worker busy [default %(default)s]",
     )
     parser.add_argument(
+        "--permutations",
+        choices=PERMUTATION_MODES,
+        default="per-replicate",
+        help="'per-target' tests every replicate of a target against one permutation set drawn "
+        "from the seed, as sceptre effectively does; 'per-replicate' draws a fresh set for each "
+        "replicate [default %(default)s]. The simulated counts are the same either way",
+    )
+    parser.add_argument(
         "--expression-model",
         choices=("fitted", "size_factor"),
         default="fitted",
@@ -231,7 +245,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"{len(genes_of)} targets / {len(split)} pairs, replicates {reps.start}-{reps.stop - 1}, "
         f"effect size {args.effect_size} (relative expression {1 - args.effect_size:g})\n"
-        f"  baseline: {args.expression_model}, n_jobs {args.n_jobs}, "
+        f"  baseline: {args.expression_model}, permutations {args.permutations}, "
+        f"n_jobs {args.n_jobs}, "
         f"B1/B2/B3 {params.B1}/{params.B2}/{params.B3}, side_code {params.side_code}"
     )
 
@@ -250,6 +265,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         guide_spread_c=args.guide_spread_c,
         expression_model=args.expression_model,
+        permutations=args.permutations,
     )
     _SHARED.update(sim=sim, params=params, grna_csc=sim.grna_perts.tocsc(), **settings)
     units = [(t, list(g), guides_of[t], r) for t, g in genes_of.items() for r in reps]

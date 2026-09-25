@@ -49,6 +49,7 @@ process POWER_SIMULATION {
             --seed ${params.seed} \\
             --n-jobs ${task.cpus} \\
             --expression-model ${params.expression_model} \\
+            --permutations ${params.permutations} \\
             --out ${out_name.replace('.gz', '')}
     gzip -f ${out_name.replace('.gz', '')}
 

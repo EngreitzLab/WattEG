@@ -46,6 +46,7 @@ def simulate(
     offset: int,
     seed: int = 7,
     n_jobs: int = 1,
+    permutations: str = "per-replicate",
 ):
     subprocess.run(
         [
@@ -66,6 +67,8 @@ def simulate(
             str(seed),
             "--n-jobs",
             str(n_jobs),
+            "--permutations",
+            permutations,
             "--out",
             str(out),
         ],
@@ -126,3 +129,33 @@ def test_a_different_seed_does_change_the_draws(prepared, split, tmp_path):
         .reset_index(drop=True)["p_value"]
         .equals(b.sort_values(KEY).reset_index(drop=True)["p_value"])
     )
+
+
+def test_per_target_permutations_keep_the_counts_and_change_the_nulls(prepared, split, tmp_path):
+    """One permutation set per target changes only the permutations.
+
+    The fold change is a function of the simulated counts alone, so equal fold changes prove the
+    two modes simulated the same counts; different p-values prove the permutations moved.
+    """
+    fresh = simulate(prepared, tmp_path / "rep.tsv", split, reps=3, offset=0)
+    shared = simulate(
+        prepared, tmp_path / "tgt.tsv", split, reps=3, offset=0, permutations="per-target"
+    )
+    fresh = fresh.sort_values(KEY).reset_index(drop=True)
+    shared = shared.sort_values(KEY).reset_index(drop=True)
+    assert fresh["log_2_fold_change"].equals(shared["log_2_fold_change"])
+    assert not fresh["p_value"].equals(shared["p_value"])
+
+
+def test_per_target_permutations_are_invariant_to_chunking_and_workers(prepared, split, tmp_path):
+    """The per-target seed depends on (seed, target, effect size), never on the replicate range
+    or the worker count, so the layout contract holds in this mode too."""
+    one = simulate(prepared, tmp_path / "a.tsv", split, reps=4, offset=0, permutations="per-target")
+    first = simulate(
+        prepared, tmp_path / "b.tsv", split, reps=2, offset=0, permutations="per-target"
+    )
+    second = simulate(
+        prepared, tmp_path / "c.tsv", split, reps=2, offset=2, n_jobs=2, permutations="per-target"
+    )
+    two = pd.concat([first, second]).sort_values(KEY).reset_index(drop=True)
+    assert one.sort_values(KEY).reset_index(drop=True).equals(two)

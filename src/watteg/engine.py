@@ -33,10 +33,15 @@ import pandas as pd
 
 from .baseline import baseline_expression
 from .perturbation import effect_size_matrix, guide_assignment, target_cells
-from .seeds import SETUP_REP, rng_for
+from .seeds import SETUP_REP, derive_seed, rng_for
 from .simulate import draw_counts
 
 DEFAULT_GUIDE_SPREAD_C = 0.65
+# How replicates of one target get their permutations. "per-replicate" draws a fresh set for every
+# replicate (the behaviour up to 2026-09-25). "per-target" gives every replicate of a target the
+# same set, drawn once from the run's seed -- what the owner chose on 2026-09-25, and close to what
+# sceptre does: its sampler reseeds mt19937(4) on every call, so R's replicates share one fixed set.
+PERMUTATION_MODES = ("per-replicate", "per-target")
 
 
 @dataclass(frozen=True)
@@ -92,6 +97,7 @@ def simulate_target(
     guide_spread_c: float = DEFAULT_GUIDE_SPREAD_C,
     n_jobs: int = 8,
     expression_model: str = "fitted",
+    permutations: str = "per-replicate",
 ) -> pd.DataFrame | None:
     """Simulate and test one target, returning one row per (pair, replicate).
 
@@ -139,6 +145,17 @@ def simulate_target(
     treated = np.flatnonzero(is_perturbed)
     pairs = pd.DataFrame({"response_id": genes, "grna_target": target})
 
+    # pysceptre draws its permutations from the seed it is given and the target's cell count, so
+    # one seed per target means one permutation set per target. It comes from a stream spawned off
+    # the setup seed, so it is independent of the guide assignment drawn from that seed and of
+    # every replicate's counts: both modes simulate byte-identical counts.
+    if permutations not in PERMUTATION_MODES:
+        raise ValueError(f"permutations must be one of {PERMUTATION_MODES}, got {permutations!r}")
+    target_permutation_seed = None
+    if permutations == "per-target":
+        stream = derive_seed(seed, target, SETUP_REP, effect_size).spawn(1)[0]
+        target_permutation_seed = int(np.random.default_rng(stream).integers(0, 2**31 - 1))
+
     out = []
     for rep in reps:
         rng = rng_for(seed, target, rep, effect_size)
@@ -156,7 +173,11 @@ def simulate_target(
             B3=params.B3,
             side_code=params.side_code,
             resampling_mechanism=params.resampling_mechanism,
-            seed=int(rng.integers(0, 2**31 - 1)),
+            seed=(
+                target_permutation_seed
+                if target_permutation_seed is not None
+                else int(rng.integers(0, 2**31 - 1))
+            ),
             n_jobs=n_jobs,
             # Stated rather than left to be discovered. Each call carries exactly one target, so
             # the default of 200 is reduced to 1 by the memory budget every single time -- and
