@@ -41,6 +41,91 @@ KEEP = [
     "n_nonzero_cntrl",
 ]
 
+# The bulk inputs, for the task-level pool. A worker reads them from here instead of
+# receiving them: under fork a child inherits them without a copy, and only the small
+# (target, replicate) descriptor crosses the process boundary.
+_SHARED: dict = {}
+
+
+def _limit_blas_threads() -> None:
+    """One BLAS thread per worker, so N workers do not start N x cores threads."""
+    try:
+        from threadpoolctl import threadpool_limits
+
+        threadpool_limits(limits=1, user_api="blas")
+    except Exception:  # pragma: no cover - threadpoolctl comes with pysceptre
+        pass
+
+
+def _run_unit(unit: tuple) -> tuple:
+    """Simulate and test one (target, replicate). pysceptre gets one worker: the task's
+    workers are already busy with other units, and nesting pools would oversubscribe."""
+    target, genes, guides, rep = unit
+    shared = _SHARED
+    at = time.perf_counter()
+    frame = simulate_target(
+        shared["sim"],
+        target,
+        genes,
+        guides,
+        effect_size=shared["effect_size"],
+        reps=range(rep, rep + 1),
+        seed=shared["seed"],
+        params=shared["params"],
+        grna_csc=shared["grna_csc"],
+        guide_spread_c=shared["guide_spread_c"],
+        n_jobs=1,
+        expression_model=shared["expression_model"],
+    )
+    return target, frame, time.perf_counter() - at
+
+
+def _load_shared(prepared: Path, settings: dict) -> None:
+    sim = read_sim_input(prepared / "sim_input.h5")
+    _SHARED.update(
+        sim=sim,
+        params=AnalysisParams.from_analysis_mode(prepared / "analysis_mode.tsv"),
+        grna_csc=sim.grna_perts.tocsc(),
+        **settings,
+    )
+
+
+def _init_spawned(prepared: Path, settings: dict) -> None:
+    _limit_blas_threads()
+    _load_shared(prepared, settings)
+
+
+def _map_units(units: list, workers: int, prepared: Path, settings: dict) -> list:
+    """Run the units in parallel, in PROCESSES, returning them in submission order.
+
+    Never threads: pysceptre's discovery call keeps its working state in a module global,
+    so two calls in one process overwrite each other (measured: KeyError 'permutations').
+    On Linux the workers are forked and inherit `_SHARED` without a copy. Elsewhere they are
+    spawned and each loads the inputs itself -- more memory, and only for local runs:
+    forking after Apple's Accelerate BLAS can deadlock, the same reason pysceptre gives.
+
+    Each unit draws from its own seeded stream (`rng_for(seed, target, rep, effect_size)`),
+    so the output does not depend on the worker count or the order the units finish in.
+    """
+    if workers <= 1 or len(units) <= 1:
+        return [_run_unit(u) for u in units]
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    if sys.platform.startswith("linux"):
+        pool = ProcessPoolExecutor(
+            max_workers=workers, mp_context=mp.get_context("fork"), initializer=_limit_blas_threads
+        )
+    else:
+        pool = ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=mp.get_context("spawn"),
+            initializer=_init_spawned,
+            initargs=(prepared, settings),
+        )
+    with pool:
+        return list(pool.map(_run_unit, units))
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -92,7 +177,11 @@ def main(argv: list[str] | None = None) -> int:
         help="retired; use --guide-spread-c. Passing it is an error",
     )
     parser.add_argument(
-        "--n-jobs", type=int, default=8, help="workers for the per-gene tests [default %(default)s]"
+        "--n-jobs",
+        type=int,
+        default=8,
+        help="workers for this task. Each (target, replicate) is one unit of work, so cis "
+        "targets with a handful of genes still keep every worker busy [default %(default)s]",
     )
     parser.add_argument(
         "--expression-model",
@@ -146,33 +235,41 @@ def main(argv: list[str] | None = None) -> int:
         f"B1/B2/B3 {params.B1}/{params.B2}/{params.B3}, side_code {params.side_code}"
     )
 
-    grna_csc = sim.grna_perts.tocsc()
-    frames = []
-    for target, genes in genes_of.items():
+    for target in genes_of.index:
         if target not in guides_of:
             raise SystemExit(f"no gRNA maps to target {target!r} in grna_targets.tsv")
-        at = time.perf_counter()
-        frame = simulate_target(
-            sim,
-            target,
-            list(genes),
-            guides_of[target],
-            effect_size=args.effect_size,
-            reps=reps,
-            seed=args.seed,
-            params=params,
-            grna_csc=grna_csc,
-            guide_spread_c=args.guide_spread_c,
-            n_jobs=args.n_jobs,
-            expression_model=args.expression_model,
-        )
-        if frame is None:
+
+    # WHY THE UNIT IS (target, replicate) AND NOT target. pysceptre's own n_jobs
+    # parallelises over the genes of one call, and a cis target has a median of 6 of
+    # them, so a task given 8 cores left most of them idle. Replicates are
+    # independent draws, so splitting them apart keeps every worker busy on cis and
+    # on trans alike. The per-target setup (guide assignment, baseline) is redone
+    # per unit; it is seeded, so it comes out identical, and it is under 1 % of a unit.
+    settings = dict(
+        effect_size=args.effect_size,
+        seed=args.seed,
+        guide_spread_c=args.guide_spread_c,
+        expression_model=args.expression_model,
+    )
+    _SHARED.update(sim=sim, params=params, grna_csc=sim.grna_perts.tocsc(), **settings)
+    units = [(t, list(g), guides_of[t], r) for t, g in genes_of.items() for r in reps]
+    workers = min(max(args.n_jobs, 1), len(units))
+    print(f"  {len(units)} (target, replicate) units on {workers} worker(s)")
+    results = _map_units(units, workers, args.prepared, settings)
+
+    by_target: dict[str, list] = {}
+    for target, frame, elapsed in results:
+        by_target.setdefault(target, []).append((frame, elapsed))
+    frames = []
+    for target, genes in genes_of.items():
+        done = by_target[target]
+        if all(frame is None for frame, _ in done):
             print(f"  {target}: skipped, no perturbed cells")
             continue
-        frames.append(frame)
-        elapsed = time.perf_counter() - at
+        frames.extend(frame for frame, _ in done if frame is not None)
+        elapsed = sum(e for _, e in done)
         print(
-            f"  {target}: {len(genes)} pairs in {elapsed:.1f}s "
+            f"  {target}: {len(genes)} pairs in {elapsed:.1f}s of worker time "
             f"({elapsed / args.reps:.2f}s/replicate)"
         )
 

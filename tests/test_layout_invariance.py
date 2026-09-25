@@ -37,7 +37,16 @@ def prepared() -> Path:
     return Path(PREPARED)
 
 
-def simulate(prepared: Path, out: Path, split: Path, *, reps: int, offset: int, seed: int = 7):
+def simulate(
+    prepared: Path,
+    out: Path,
+    split: Path,
+    *,
+    reps: int,
+    offset: int,
+    seed: int = 7,
+    n_jobs: int = 1,
+):
     subprocess.run(
         [
             sys.executable,
@@ -55,6 +64,8 @@ def simulate(prepared: Path, out: Path, split: Path, *, reps: int, offset: int, 
             str(offset),
             "--seed",
             str(seed),
+            "--n-jobs",
+            str(n_jobs),
             "--out",
             str(out),
         ],
@@ -90,6 +101,19 @@ def test_replicate_chunking_does_not_change_a_single_draw(prepared, split, tmp_p
     two = two.sort_values(KEY).reset_index(drop=True)
     assert len(one) == len(two)
     assert one.equals(two)
+
+
+def test_worker_count_does_not_change_a_single_draw(prepared, split, tmp_path):
+    """One worker against three, byte for byte and row for row.
+
+    The task runs (target, replicate) units in parallel and they finish in any
+    order; each draws from its own seeded stream and the results are gathered in
+    submission order, so neither the draws nor the row order can move.
+    """
+    serial = simulate(prepared, tmp_path / "j1.tsv", split, reps=4, offset=0, n_jobs=1)
+    parallel = simulate(prepared, tmp_path / "j3.tsv", split, reps=4, offset=0, n_jobs=3)
+    assert (tmp_path / "j1.tsv").read_bytes() == (tmp_path / "j3.tsv").read_bytes()
+    assert serial.equals(parallel)
 
 
 def test_a_different_seed_does_change_the_draws(prepared, split, tmp_path):
