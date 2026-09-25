@@ -278,3 +278,40 @@ def test_the_defaults_are_the_fast_configuration(prepared, split, tmp_path):
         [*base, *fast, "--out", str(tmp_path / "e.tsv")], check=True, capture_output=True
     )
     assert (tmp_path / "d.tsv").read_bytes() == (tmp_path / "e.tsv").read_bytes()
+
+
+def test_power_from_the_tasks_counts_equals_power_from_its_rows(prepared, split, tmp_path):
+    """A task writes its rows and its per-pair counts from one run; watteg-compute-power gives the
+    same bytes from either, the counts' route being the pipeline's default."""
+    threshold = prepared / "discovery_threshold.txt"
+    extra = ("--partials-out", str(tmp_path / "counts.tsv"), "--threshold-file", str(threshold))
+    simulate(
+        prepared,
+        tmp_path / "rows.tsv",
+        split,
+        reps=5,
+        offset=0,
+        permutations="per-target",
+        driver="fast",
+        null_fits="reuse",
+        extra=extra,
+    )
+    for source, path in (("--simulations", "rows.tsv"), ("--partials", "counts.tsv")):
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "watteg.cli.compute_power",
+                source,
+                str(tmp_path / path),
+                "--threshold-file",
+                str(threshold),
+                "--out",
+                str(tmp_path / f"power_{path}"),
+            ],
+            check=True,
+            capture_output=True,
+        )
+    assert (tmp_path / "power_rows.tsv").read_bytes() == (
+        tmp_path / "power_counts.tsv"
+    ).read_bytes()

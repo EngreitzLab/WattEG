@@ -181,3 +181,106 @@ def test_the_estimand_is_carried_and_mixing_estimands_is_refused():
     mixed = pd.concat([fixed, simulations([1e-5], [-0.2], gene="geneY").assign(estimand="random")])
     with pytest.raises(ValueError, match="mixes estimands"):
         compute_power(mixed, threshold=1e-3)
+
+
+# --- per-pair counts inside the task ---------------------------------------------------------
+#
+# A simulation task that holds all simulations of its pairs writes per-pair counts instead of one
+# row per simulation, and COMPUTE_POWER adds them up. The claim is that this gives the table a
+# consolidated per-simulation file gives, byte for byte.
+
+
+def sweep(seed=4, n_targets=5, genes_per_target=4, n_sims=30):
+    """A small sweep, in the order a task writes it: target by target, simulation-major."""
+    rng = np.random.default_rng(seed)
+    frames = []
+    for t in range(n_targets):
+        genes = [f"g{t}_{i}" for i in range(genes_per_target)]
+        cells = int(rng.integers(50, 600))
+        for rep in range(1, n_sims + 1):
+            frames.append(
+                pd.DataFrame(
+                    {
+                        "grna_target": f"t{t}",
+                        "response_id": genes,
+                        "p_value": 10 ** rng.uniform(-8, 0, len(genes)),
+                        "log_2_fold_change": rng.normal(-0.2, 0.15, len(genes)),
+                        "rep": rep,
+                        "effect_size": 0.15,
+                        "num_pert_cells": cells,
+                        "estimand": "fixed",
+                    }
+                )
+            )
+    frame = pd.concat(frames, ignore_index=True)
+    frame.loc[rng.random(len(frame)) < 0.02, "p_value"] = np.nan
+    return frame
+
+
+def test_counts_from_each_task_give_the_table_the_rows_give():
+    from watteg.power import merge_power_counts, power_counts, power_from_counts
+
+    rows = sweep()
+    expected = compute_power(rows, threshold=1e-3)
+    by_task = [power_counts(part, 1e-3) for _, part in rows.groupby("grna_target", sort=False)]
+    merged = power_from_counts(merge_power_counts(by_task))
+    assert list(merged.columns) == list(expected.columns)
+    assert list(merged.dtypes) == list(expected.dtypes)
+    assert merged.equals(expected)
+
+
+def test_counts_from_simulation_chunks_add_up_and_overlaps_are_refused():
+    from watteg.power import merge_power_counts, power_counts, power_from_counts
+
+    rows = sweep()
+    expected = compute_power(rows, threshold=1e-3)
+    early, late = rows[rows["rep"] <= 12], rows[rows["rep"] > 12]
+    merged = power_from_counts(
+        merge_power_counts([power_counts(early, 1e-3), power_counts(late, 1e-3)])
+    )
+    exact = ["grna_target", "response_id", "power", "power_ci_low", "power_ci_high", "n_reps"]
+    assert merged[exact].equals(expected[exact])
+    np.testing.assert_allclose(
+        merged["mean_log_2_fold_change"], expected["mean_log_2_fold_change"], rtol=1e-12
+    )
+
+    with pytest.raises(ValueError, match="overlapping simulation ranges"):
+        merge_power_counts([power_counts(rows, 1e-3), power_counts(late, 1e-3)])
+    with pytest.raises(ValueError, match="mixes thresholds"):
+        merge_power_counts([power_counts(early, 1e-3), power_counts(late, 1e-4)])
+
+
+def test_a_pair_with_no_usable_simulation_is_counted_and_left_out_of_the_table():
+    from watteg.power import power_counts, power_from_counts
+
+    rows = sweep()
+    rows.loc[rows["response_id"] == "g2_1", "p_value"] = np.nan
+    counts = power_counts(rows, 1e-3)
+    lost = counts[counts["response_id"] == "g2_1"].iloc[0]
+    assert (lost["n_reps"], lost["n_simulations"], lost["successes"]) == (0, 30, 0)
+    table = power_from_counts(counts)
+    assert "g2_1" not in set(table["response_id"])
+    assert table.equals(compute_power(rows, threshold=1e-3))
+
+
+def test_the_cli_gives_the_same_bytes_from_counts_and_from_rows(tmp_path):
+    """End to end through the files: each task's rows as TSV and its counts as written by the
+    simulation CLI, then watteg-compute-power on either. The TSV floats are read back exactly."""
+    from watteg.cli.compute_power import main as compute
+    from watteg.cli.run_power_simulation import _write_partials
+
+    threshold = tmp_path / "threshold.txt"
+    threshold.write_text("0.00064839688355153302\n")
+    rows = sweep(seed=9, n_sims=40)
+    (tmp_path / "sims").mkdir()
+    (tmp_path / "partials").mkdir()
+    for target, part in rows.groupby("grna_target", sort=False):
+        part.to_csv(tmp_path / "sims" / f"{target}.tsv", sep="\t", index=False)
+        _write_partials(part, threshold, tmp_path / "partials" / f"{target}.tsv")
+    common = ["--threshold-file", str(threshold)]
+    compute(["--simulations", str(tmp_path / "sims"), *common, "--out", str(tmp_path / "a.tsv")])
+    compute(["--partials", str(tmp_path / "partials"), *common, "--out", str(tmp_path / "b.tsv")])
+    assert (tmp_path / "a.tsv").read_bytes() == (tmp_path / "b.tsv").read_bytes()
+
+    with pytest.raises(SystemExit, match="partial counts were taken at"):
+        compute(["--partials", str(tmp_path / "partials"), "--alpha", "0.05", "--out", "x.tsv"])

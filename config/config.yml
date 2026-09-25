@@ -75,6 +75,13 @@ n_splits: 1000
 # prefer raising n_splits over lowering this. See docs/status.md, "Decisions already made".
 reps_per_chunk: 100
 
+# Keep one row per (pair, simulation), published as a Parquet per effect size. Off by default:
+# each simulation task holds all simulations of its pairs and writes per-pair counts, and
+# COMPUTE_POWER builds the same power table from them (docs/output.md). Turn it on for a sweep you
+# will want to re-analyse by simulation (subsampling, bootstrapping, a new threshold). Implied when
+# reps_per_chunk < num_replicates.
+keep_per_simulation: false
+
 # Base RNG seed.
 seed: 20250812
 

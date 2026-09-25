@@ -829,11 +829,12 @@ Decided with the owner on 2026-09-25. Items 1 and 2 are settled; items 3-5 wait 
 measurements in progress, and their numbers are estimates until then.
 
 **Status, 2026-09-25 (end of day).** Done: item 1 in Python (R still to do); item 2 (`e6c6db6`);
-3a (`3ea5baa`); 3b, the fast driver (`288cb0f`); 3c, fit reuse. **The defaults are now the fast configuration:** `--permutations
+3a (`3ea5baa`); 3b, the fast driver (`288cb0f`); 3c, fit reuse; item 4's per-pair power inside the
+task. **The defaults are now the fast configuration:** `--permutations
 per-target`, `--nulls sparse`, `--driver fast`, `--null-fits reuse` (CLI and Nextflow), with the
 engine, `refit`, `scan` and `per-replicate` still selectable. A CRT screen needs `--driver engine
 --null-fits refit`, because the fast driver runs the permutation test only. Not done: 3d (waits on
-a pysceptre release), item 4, item 5 (a cloud measurement), item 6 (not to be run until decided).
+a pysceptre release), item 5 (a cloud measurement), item 6 (not to be run until decided).
 
 **What does not change: the simulation keeps the full design.** Each replicate runs the screen's
 actual test on its actual cells, covariates, guide assignment and threshold, including sceptre's
@@ -1040,7 +1041,21 @@ itself, which a single target never does. Once that is released:
 
 The issue stays open for drawing permutation stages lazily.
 
-### 4. Task shape and resources
+### 4. Task shape and resources -- per-pair power inside the task: done
+
+**Done 2026-09-25: per-pair power inside each task.** When a task holds all simulations of its pairs
+(`reps_per_chunk == num_replicates`, the default), `POWER_SIMULATION` writes per-pair counts
+(`--partials-out`: simulations called, simulations used, the fold-change and cell-count sums, the
+simulation range) and `COMPUTE_POWER` adds them up (`--partials`). The per-simulation table and
+`CONSOLIDATE_REPLICATES` run only under `keep_per_simulation` (default false) or when simulations
+are chunked across tasks. Checked: the power table from the counts equals the one from the rows,
+byte for byte, in unit tests, a realdata test and a real local Nextflow run on moi5 cis (the
+counts' table, and `watteg-compute-power` on the published Parquet of a `keep_per_simulation` run).
+That needed one fix on the rows' side: pandas' default CSV parser returned a neighbouring float for
+about half of a TSV's values (285,883 of 500,000 measured), so the rows are now read with
+`float_precision="round_trip"`. The stub DAG passes in all four shapes (default, kept rows,
+chunked simulations, fast driver with fits), and a tiny real run passes on moi5 cis (defaults) and
+on day0 (a CRT screen, `--driver engine --null_fits refit`).
 
 - **A task holds whole targets with all their replicates,** and writes per-pair power directly. The
   74M-row consolidation and power steps become optional, kept only for a per-replicate table when

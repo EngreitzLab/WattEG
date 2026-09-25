@@ -5,6 +5,11 @@
 // hundreds of times. One Parquet file reads in a second or two and takes the published output from
 // 6,000 files to 6.
 //
+// It runs only when the per-simulation rows are written: under keep_per_simulation, or when
+// simulations are chunked across tasks (reps_per_chunk < num_replicates). By default each
+// simulation task writes per-pair counts instead, and COMPUTE_POWER builds the same power table
+// from those, without the 74M-row table moi5 trans would otherwise need.
+//
 // This is the ONLY published form of the per-simulation data. The per-split files stay in the work
 // directory, which is what makes the run resumable and preemption-tolerant, and means a failed
 // consolidation cannot lose anything.

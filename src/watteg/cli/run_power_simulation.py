@@ -156,6 +156,43 @@ def _map_units(units: list, workers: int, prepared: Path, settings: dict, fn=_ru
     return map_units(units, workers, prepared, settings, fn)
 
 
+# The per-pair counts a task writes for watteg-compute-power --partials, in this order.
+PARTIAL_COLUMNS = [
+    "grna_target",
+    "response_id",
+    "effect_size",
+    "estimand",
+    "threshold",
+    "rep_first",
+    "rep_last",
+    "n_simulations",
+    "successes",
+    "n_reps",
+    "sum_log_2_fold_change",
+    "sum_num_pert_cells",
+]
+
+
+def _write_partials(combined: pd.DataFrame, threshold_file: Path, out: Path) -> None:
+    """Per-pair counts from this task's rows: the same sums a table of all rows would give.
+
+    The rows are the ones --out writes, in memory at full precision, so the counts equal those
+    computed from the written table read back exactly. A task whose every target was skipped
+    writes the header alone, which the pipeline's row count then reports.
+    """
+    from watteg.power import power_counts
+
+    threshold = float(threshold_file.read_text().split()[0])
+    if combined.empty:
+        counts = pd.DataFrame(columns=PARTIAL_COLUMNS)
+    else:
+        counts = power_counts(combined, threshold)
+        counts = counts[[c for c in PARTIAL_COLUMNS if c in counts.columns]]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    counts.to_csv(out, sep="\t", index=False)
+    print(f"wrote per-pair counts for {len(counts):,} pairs to {out} (threshold {threshold:.6g})")
+
+
 def _null_fits_for_task(args, sim, split: pd.DataFrame, reps: range):
     """The fits this task's genes need, from --null-fits-file or made here.
 
@@ -245,7 +282,23 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="required: results are stochastic and must be reproducible",
     )
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--out", type=Path, default=None, help="one row per (pair, simulation), as TSV"
+    )
+    parser.add_argument(
+        "--partials-out",
+        type=Path,
+        default=None,
+        help="per-pair counts power is made of (watteg.power.power_counts), for "
+        "watteg-compute-power --partials. Complete only when this task holds all simulations of "
+        "its pairs; needs --threshold-file",
+    )
+    parser.add_argument(
+        "--threshold-file",
+        type=Path,
+        default=None,
+        help="the discovery threshold a simulation must beat, for --partials-out",
+    )
     parser.add_argument(
         "--guide-spread-c",
         type=float,
@@ -337,6 +390,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.reps < 1:
         raise SystemExit("--reps must be at least 1")
+    if args.out is None and args.partials_out is None:
+        raise SystemExit("pass --out, --partials-out or both: otherwise nothing is written")
+    if args.partials_out is not None and args.threshold_file is None:
+        raise SystemExit("--partials-out needs --threshold-file: a call is p below the threshold")
     if args.guide_sd is not None:
         raise SystemExit(
             "--guide-sd was replaced by --guide-spread-c on 2026-09-25: the spread is now "
@@ -466,9 +523,14 @@ def main(argv: list[str] | None = None) -> int:
             how="left",
         )
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    combined[[c for c in KEEP if c in combined]].to_csv(args.out, sep="\t", index=False)
-    print(f"\nwrote {len(combined):,} rows to {args.out} in {time.perf_counter() - started:.1f}s")
+    combined = combined[[c for c in KEEP if c in combined]]
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        combined.to_csv(args.out, sep="\t", index=False)
+        print(f"\nwrote {len(combined):,} rows to {args.out}")
+    if args.partials_out is not None:
+        _write_partials(combined, args.threshold_file, args.partials_out)
+    print(f"done in {time.perf_counter() - started:.1f}s")
     return 0
 
 

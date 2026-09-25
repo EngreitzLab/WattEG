@@ -1,4 +1,6 @@
-// Step 5 -- turn the per-simulation rows into a power estimate per pair.
+// Step 5 -- a power estimate per pair, from the simulation tasks' per-pair counts or, when
+// simulations were chunked across tasks, from the consolidated per-simulation rows. Both routes give
+// the same table (watteg.power.power_from_counts; tests/test_power.py).
 //
 // Power is the fraction of simulations whose p-value clears the discovery threshold, and the
 // threshold comes from the sceptre object's own @discovery_result rather than from a nominal alpha,
@@ -15,8 +17,9 @@ process COMPUTE_POWER {
     publishDir { "${params.outdir}/${meta.id}/power" }, mode: params.publish_mode
 
     input:
-    // One consolidated Parquet per effect size, from CONSOLIDATE_REPLICATES. Was 1,000 staged
-    // TSVs; the file list below is kept general so an older sweep's TSVs still work.
+    // Either every simulation task's per-pair counts for one effect size (*.partial.tsv.gz), or
+    // one consolidated Parquet from CONSOLIDATE_REPLICATES; the file list below is kept general so
+    // an older sweep's TSVs still work.
     //
     // The threshold rides in the same tuple, joined on meta in main.nf. It used to arrive as a second
     // channel built with `.first()`, so in a multi-sample run every sample was scored against sample
@@ -38,9 +41,16 @@ process COMPUTE_POWER {
     # at all -- every real Python run, first seen on moi5 cis 2026-09-25. R's module escaped it
     # only because it piped `ls` into `paste`, whose status is the one bash checks.
     shopt -s nullglob
+    partial_list=(sim/*.partial.tsv.gz)
     sim_list=(sim/*.parquet sim/*.tsv.gz sim/*.tsv)
     shopt -u nullglob
-    echo "combining \${#sim_list[@]} file(s)"
+    if [ \${#partial_list[@]} -gt 0 ]; then
+        source_arg=--partials
+        sim_list=("\${partial_list[@]}")
+    else
+        source_arg=--simulations
+    fi
+    echo "combining \${#sim_list[@]} file(s) (\${source_arg})"
     if [ \${#sim_list[@]} -eq 0 ]; then
         echo "ERROR: no simulation files staged under sim/" >&2
         exit 1
@@ -48,7 +58,7 @@ process COMPUTE_POWER {
 
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
         watteg-compute-power \\
-            --simulations "\${sim_list[@]}" \\
+            \${source_arg} "\${sim_list[@]}" \\
             --threshold-file ${threshold} \\
             --conf-level ${params.conf_level} \\
             --out power_es${effect_size}.tsv

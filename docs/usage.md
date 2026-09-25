@@ -57,7 +57,7 @@ dataset.h5mu
       +--> pairs.tsv                   QC-passing discovery pairs
       +--> pairs_with_info.tsv         every pair with its real-data QC counts
       +--> grna_targets.tsv            gRNA -> target mapping (many-to-many)
-      +--> discovery_threshold.txt     the p-value a replicate must beat
+      +--> discovery_threshold.txt     the p-value a simulation must beat
       +--> analysis_mode.tsv           which test the screen ran, and its resampling budget
       |
       |  watteg-split-pairs            once per sample
@@ -66,13 +66,14 @@ dataset.h5mu
       |  watteg-fit-null-models        once per sample, under --null-fits reuse
       +--> null_fits.h5                each gene's null-model fit, per simulation
       |
-      |  watteg-run-power-simulation   once per (split, effect size, replicate chunk)
-      +--> sim_*.tsv.gz                one row per (pair, replicate)
+      |  watteg-run-power-simulation   once per (split, effect size, simulation chunk)
+      +--> *.partial.tsv.gz            per-pair counts (--partials-out), by default
+      +--> *.tsv.gz                    one row per (pair, simulation) (--out), optional
       |
-      |  watteg-consolidate-replicates once per effect size
-      +--> es*.parquet                 the same rows, as one file
+      |  watteg-consolidate-replicates once per effect size, only if the rows were written
+      +--> replicates_es*.parquet      the same rows, as one file
       |
-      |  watteg-compute-power          once per effect size
+      |  watteg-compute-power          once per effect size, from the counts or the rows
       +--> power_es*.tsv               one row per pair, with confidence intervals
       |
       |  watteg-summarize-power        once per sample
@@ -125,7 +126,7 @@ watteg-split-pairs --pairs prepared/pairs.tsv --n-splits 280 --outdir splits/
 | `--prefix` | `split_` | Filename prefix; files are zero-padded so lexicographic order is numeric order. |
 
 A target's pairs cannot be separated — the simulation draws one count matrix per (target,
-replicate) and tests every one of that target's genes against it — so targets are the unit and the
+simulation) and tests every one of that target's genes against it — so targets are the unit and the
 job is bin packing. Weighted by pairs **plus an overhead**, because a task's cost is
 `intercept + slope × pairs` and weighting by pairs alone over-fills the splits that hold many small
 targets.
@@ -157,6 +158,8 @@ watteg-run-power-simulation \
 | `--null-fits-file` | none | `watteg-fit-null-models`' output. Without it, a `reuse` task fits its own genes first; same output. |
 | `--n-jobs` | 8 | Worker processes for the task. |
 | `--expression-model` | `fitted` | Where a gene's unperturbed expected counts come from. |
+| `--out` | none | One row per (pair, simulation), as TSV. |
+| `--partials-out`, `--threshold-file` | none | Per-pair counts for `watteg-compute-power --partials`, taken at the discovery threshold. Complete when the task holds all simulations of its pairs. At least one of `--out` and `--partials-out` is required. |
 
 **The defaults are the fast configuration**, each part measured before it was adopted
 ([Methods](methods.md#running-the-screens-test-on-each-simulation)). The previous configuration is
@@ -212,8 +215,11 @@ watteg-summarize-power \
     --sim-input prepared/sim_input.h5 --out power_summary.tsv
 ```
 
-`--simulations` takes files or directories; a directory expands to the `.tsv`, `.tsv.gz` and
-`.parquet` files inside it, sorted. `--power-threshold` (default 0.8) sets what "detectable" means
+`watteg-compute-power` takes either `--partials` (the simulation tasks' per-pair counts) or
+`--simulations` (one row per pair and simulation), and gives the same table from both when each
+pair's simulations came from one task. Both take files or directories; a directory expands to the
+`.tsv`, `.tsv.gz` and `.parquet` files inside it, sorted. In the pipeline the rows are written only
+under `keep_per_simulation: true`, or when `reps_per_chunk` < `num_replicates`. `--power-threshold` (default 0.8) sets what "detectable" means
 for the minimum-detectable-effect-size columns.
 
 ---
@@ -221,9 +227,10 @@ for the minimum-detectable-effect-size columns.
 ## Reproducibility
 
 A pair's power does not depend on how the work was split up. Every draw is keyed on
-`(seed, target, replicate, effect size)` and nothing else, so simulating replicates 1–100 in one
+`(seed, target, simulation, effect size)` and nothing else, so running simulations 1–100 in one
 task and in five tasks of twenty gives **byte-identical** results, and so does moving a target from
-one split to another. That is checked end to end:
+one split to another. A reused null-model fit is keyed on (seed, gene, simulation), so it is the
+same wherever it was made. That is checked end to end:
 
 ```sh
 WATTEG_PREPARED=prepared/ pytest -m realdata
@@ -238,11 +245,11 @@ measured.
 
 ## Sizing a cluster run
 
-The unit of work is (split × effect size × replicate chunk), and essentially all of the compute is
+The unit of work is (split × effect size × simulation chunk), and essentially all of the compute is
 in step 3. A task's cost follows `intercept + slope × pairs`, so:
 
 - halving the **pairs** saves less than half, because the intercept does not move;
-- halving the **replicates** saves exactly half;
+- halving the **simulations** saves exactly half;
 - effect sizes cost the same as each other.
 
 `--n-jobs` buys wall clock rather than CPU time: measured on a 10-performance-core machine, 8

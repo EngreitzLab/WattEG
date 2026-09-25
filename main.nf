@@ -8,8 +8,14 @@
 //
 //   samplesheet -> PREPARE_SIM_INPUT -> SPLIT_PAIRS
 //                        |                   -> POWER_SIMULATION (split x effect size x rep chunk)
-//                        +-> FIT_NULL_MODELS ---^   -> CONSOLIDATE_REPLICATES
-//                                                   -> COMPUTE_POWER -> SUMMARIZE_POWER
+//                        +-> FIT_NULL_MODELS ---^   -> per-pair counts -> COMPUTE_POWER
+//                                                   -> [CONSOLIDATE_REPLICATES]   -> SUMMARIZE_POWER
+//
+// Power is computed inside each simulation task when the task holds all simulations of its pairs
+// (reps_per_chunk == num_replicates, the default): it writes per-pair counts and COMPUTE_POWER adds
+// them up, which gives the table the per-simulation rows give, byte for byte. The rows, and
+// CONSOLIDATE_REPLICATES that publishes them as Parquet, run only under keep_per_simulation or when
+// simulations are chunked across tasks, where power is computed from the rows as before.
 //
 // FIT_NULL_MODELS runs under --driver fast --null-fits reuse: each gene's null model is fitted once
 // per simulation, on an independent draw with no knockdown, and every simulation task reuses that
@@ -59,6 +65,12 @@ workflow {
     }
     if (!params.effect_sizes || params.effect_sizes.size() == 0) {
         error "effect_sizes is empty -- nothing to simulate."
+    }
+    if (params.reps_per_chunk != params.num_replicates && !params.keep_per_simulation) {
+        log.warn "reps_per_chunk (${params.reps_per_chunk}) < num_replicates " +
+                 "(${params.num_replicates}): a pair's simulations span several tasks, so power " +
+                 "is computed from the per-simulation rows, which are written and consolidated " +
+                 "as if keep_per_simulation were true."
     }
     if (params.num_replicates % params.reps_per_chunk != 0) {
         error "num_replicates (${params.num_replicates}) must be a multiple of reps_per_chunk " +
@@ -180,6 +192,7 @@ workflow {
         .map { meta, sim_input, grna_targets, analysis_mode, info ->
             [meta, sim_input, grna_targets, analysis_mode, info ?: []] }
         .join(ch_null_fits)
+        .join(PREPARE_SIM_INPUT.out.threshold)
 
     ch_rep_chunks = Channel
         .of(0..<(params.num_replicates.intdiv(params.reps_per_chunk)))
@@ -188,8 +201,8 @@ workflow {
     // combine on the meta key so a multi-sample run pairs each sample with its own splits rather
     // than with every sample's.
     // No trailing map: `combine` flattens the [offset, reps] pair into two elements rather than
-    // keeping it as one, so this already emits the ten fields POWER_SIMULATION declares --
-    // meta, sim_input, grna_targets, analysis_mode, pairs_with_info, null_fits, split,
+    // keeping it as one, so this already emits the eleven fields POWER_SIMULATION declares --
+    // meta, sim_input, grna_targets, analysis_mode, pairs_with_info, null_fits, threshold, split,
     // effect_size, rep_offset, reps.
     ch_sim_tasks = ch_sim_inputs
         .combine(ch_splits, by: 0)
@@ -198,26 +211,24 @@ workflow {
 
     POWER_SIMULATION(ch_sim_tasks)
 
+    // ---- step 4: the per-simulation rows, when they are written --------------------------------
+    //
+    // groupTuple over (meta, effect size) collects every split's output for one effect size. With
+    // no rows written (the default) the channel is empty and CONSOLIDATE_REPLICATES never runs.
+    // Deliberately not collectFile: the power step takes the file list itself and validates it.
+    CONSOLIDATE_REPLICATES(POWER_SIMULATION.out.sim.groupTuple(by: [0, 1]))
+
     // ---- step 5: power, per (sample, effect size) -------------------------------------------
     //
-    // groupTuple over (meta, effect size) collects every split's output for one effect size.
-    // Deliberately not collectFile: compute_power.R takes the file list itself and validates the
-    // replicate count per pair, which a concatenation would hide.
-    ch_by_es = POWER_SIMULATION.out.sim.groupTuple(by: [0, 1])
-
-    // ---- step 4b: one Parquet per effect size ----------------------------------------------
+    // From the tasks' per-pair counts when each task held all simulations of its pairs; from the
+    // consolidated rows otherwise. `whole` mirrors the test POWER_SIMULATION makes.
     //
-    // The per-split TSVs are no longer published; this is. They cost 30-90 s of parsing per read
-    // as 1,000 gzipped files, and the per-replicate output is the one thing power can be
-    // re-derived from, so it is read repeatedly. The splits remain in the work directory, so a
-    // failed consolidation loses nothing.
-    CONSOLIDATE_REPLICATES(ch_by_es)
-
     // Each sample's own threshold, joined on the meta key -- not `.first()`, which scored every
     // sample of a multi-sample run against sample 1's.
-    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet
-                      .map { meta, es, f -> [meta, es, [f]] }
-                      .combine(PREPARE_SIM_INPUT.out.threshold, by: 0))
+    ch_power_in = (params.reps_per_chunk as int) == (params.num_replicates as int)
+        ? POWER_SIMULATION.out.partials.groupTuple(by: [0, 1])
+        : CONSOLIDATE_REPLICATES.out.parquet.map { meta, es, f -> [meta, es, [f]] }
+    COMPUTE_POWER(ch_power_in.combine(PREPARE_SIM_INPUT.out.threshold, by: 0))
 
     // ---- step 6: one row per pair across every effect size ---------------------------------
     ch_all_power = COMPUTE_POWER.out.power
