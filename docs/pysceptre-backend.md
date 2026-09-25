@@ -666,7 +666,8 @@ one stage with an absolute bar rather than a relative one.
 7. **Stage B/C/D validation** at full scale on one effect size. **Stage D is done** — four
    replicates in one task against two tasks of two are byte-identical, and a different seed does
    change the draws, so the invariance is not coming from the seed being ignored. It runs behind
-   `-m realdata`. **Stages 0, B and C need a cluster sweep** and are the outstanding work.
+   `-m realdata`. **Stage B passed at full scale on moi5 cis, 2026-09-25** (§12). Stages 0 and C
+   are still open.
 8. **Docs** — `README.md` and a pointer on `status.md` are done. `usage.md`, `methods.md` and
    `output.md` still describe the R path.
 
@@ -761,6 +762,49 @@ worth saying out loud rather than reporting as a clean green.
 > had chosen it. The owner has now chosen the fixed element effect for both languages, with control
 > cells at exactly 1 (see `methods.md`, "What simulated power means"). A Stage B re-run therefore
 > compares two implementations of the same estimand, and is expected to agree.
+
+### Stage B at full scale, 2026-09-25: the two implementations agree
+
+Both pipelines on moi5 cis: every one of the 33,066 pairs, es 0.15, 100 replicates each, the
+screen's own permutation test, `guide_spread_c = 0.65`, same seed. R ran at `1f44a42` (run
+`chaotic_lovelace`), Python at `6570024` (run `intergalactic_liskov`). The two prepares wrote
+byte-identical `pairs.tsv` and the same discovery threshold, 0.000648397.
+
+| check | result |
+|---|---|
+| per-pair power within 2 se of Monte Carlo noise | **96.9 %** of pairs (≈95 % expected by chance) — pass |
+| status at the 0.8 bar | **98.1 %** agree; 320 Python-only, 318 R-only, every one sitting on the bar — pass |
+| mean power | Python 0.6040, R 0.6045 |
+| median fold change | Python log2 −0.2352, R −0.2359, target log2(0.85) = −0.2345 |
+| systematic shift | **−0.00055**, against a 2-se bound of 0.00047 (0.00048 clustered by target) — formally a fail |
+
+The shift is real at about 2.3 se and is 0.06 points of power. It is flat across expression
+quintiles and sits in mid-power pairs (−0.19 points at power 0.3–0.7), the shape a small calibration
+difference in the test gives. One is known and expected: R hoists the gRNA null model out of the
+simulation (`FIT_NULL_MODELS`, fitted once per replicate on an independent null simulation), while
+Python refits it inside every call (§3.1). A port bug would not show up as 0.06 points spread
+evenly over 33,066 pairs with the 0.8 crossings symmetric to within two pairs. **Verdict: the Python
+path computes the same power as the R path.** What Stage B does not cover: trans, where there is
+no R sweep on this code, and other screens.
+
+**Two pipeline bugs that only a real run could find**, both fixed; neither changes a number:
+
+- `prepare_sim_input` rebuilt `set(pairs["response_id"])` once per gene: 108 min on moi5 trans
+  (38,606 genes × 742,525 pairs), past the task's 1 h limit, against 92 s with the set built once
+  (`f2d684c`). cis hid it at 33,066 pairs.
+- `COMPUTE_POWER` listed its inputs with `$(ls a b c)`. Only one pattern ever matches, `ls` exits 2,
+  and `bash -e` killed the task on that line with empty stdout and stderr (`efd0f05`). Every real
+  Python run so far died there; the stub never runs the script. The cis power table above was
+  computed from the pipeline's own consolidated Parquet with the module's exact command.
+
+**Cloud cost, measured, which replaces the R numbers in `conf/base.config` as a starting point.**
+On `e2-standard-2` spot a POWER_SIMULATION task runs ~0.37 s per pair-replicate on cis, about 4×
+the laptop's rate. Trans targets carry ~250 genes each, and there `--n-jobs` pays: on one target,
+40 s per replicate at 1 worker, 26 at 2, 19 at 4 and 16 at 8, with byte-identical output. So trans
+runs at `cpus = 4`, `reps_per_chunk = 10`; at 1 CPU a 20-replicate trans task needs ~2.5 h and would
+hit the 2 h limit on every task. The memory closure asks 8 GB for any non-empty split (the predicted
+figure always clears the 4 GB floor), while the 1,000 Python cis tasks peaked at 1.1-1.3 GB,
+20-24 min each.
 
 **Three scientific questions are open and recorded, none of them acted on** (§3.2b, §3.2c, §5.2).
 The largest, simulating from `exp(X . beta)`, has been taken; the other two are judgement calls
