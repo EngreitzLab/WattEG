@@ -946,6 +946,48 @@ the same screen:
 same permutation set, the fast driver's p-values match the current engine's per pair, bit for bit
 where the operations are the same and to a stated tolerance where the fits are batched.
 
+#### 3c. Then: reuse each gene's null-model fit (decided 2026-09-25, after step 2 verifies)
+
+**Why.** The gene refit is the largest cost left after 3a and 3b: about 49 ms of every simulated
+pair-test, 27 % of today's cost. That is because each simulation refits every gene once per target.
+The real screen fits each gene once for about 135 targets.
+
+**What.** R's `FIT_NULL_MODELS` approximation, in Python:
+- Fit each gene's null model once per simulation, on an independent es = 0 draw keyed
+  `rng_for(seed, "__null_fit__|" + gene, rep, 0.0)`.
+- Use pysceptre's own `fit_all_genes`, at the same batch width and with the same `x_outer_flat`.
+- Reuse that fit for every target the gene is tested against, and every effect size.
+- The fits are a small file: about 2.5 MB for 244 genes x 100 simulations.
+
+**Pipeline.** A `FIT_NULL_MODELS` step between `PREPARE_SIM_INPUT` and `POWER_SIMULATION`, about
+25-30 CPU-minutes per sweep, feeding every simulation task. The fast driver takes the fits in place
+of calling `fit_all_genes` itself. `--null-fits reuse | refit` keeps the exact refit available;
+the default is `reuse`.
+
+**Measured cost and fidelity** (`speed/hoist_null_fit/`, laptop, same counts and permutations):
+- **Speed:** 1.24x on cis, 1.27-1.29x on trans.
+- **Calls:** the call rate is identical on cis (806 of 1,200 pair-tests), with 8 flips, 4 each
+  way. trans calls 1,284 against 1,283.
+- **p-values:** they move about a quarter as much as a change of permutation seed.
+- **Bias:** no directional bias is detectable.
+
+**Checks:**
+- `refit` stays byte-identical to today.
+- `reuse` against `refit` on the cis and trans reference targets: call rate and per-pair power
+  within Monte Carlo noise.
+- A fit is keyed only on (gene, simulation), so no result depends on which other genes or targets
+  share its task.
+
+#### 3d. After pysceptre's next release: retire `--nulls`
+
+pysceptre `dev` (0de1bff, broadinstitute/pysceptre#2) now chooses the scan only when it pays for
+itself, which a single target never does. Once that is released:
+- bump the pin and rebuild the image;
+- drop the `--nulls` switch;
+- keep the real-data test that compares the two routes.
+
+The issue stays open for drawing permutation stages lazily.
+
 ### 4. Task shape and resources
 
 - **A task holds whole targets with all their replicates,** and writes per-pair power directly. The
