@@ -32,6 +32,12 @@ from watteg.engine import (
 )
 from watteg.sim_input import read_sim_input
 
+# "engine" calls pysceptre once per (target, simulation). "fast" (watteg.fast_driver) runs a
+# target's simulations together so its permutation matrices are built once, with output
+# byte-identical to the engine's under --permutations per-target; it needs that mode, since the
+# matrices are shared only when the simulations share one permutation set.
+DRIVERS = ("engine", "fast")
+
 # What a reader needs, and nothing more. At 100 replicates x 34,886 pairs x six
 # effect sizes the columns nothing reads were 39% of a 3 GB output.
 KEEP = [
@@ -88,6 +94,50 @@ def _run_unit(unit: tuple) -> tuple:
     return target, frame, time.perf_counter() - at
 
 
+def _run_fast_unit(unit: tuple) -> tuple:
+    """Simulate and test one target's simulations `start..stop-1` with the fast driver.
+
+    Imported here, not at the top, so the default driver's start-up is exactly what it was.
+    """
+    from watteg.fast_driver import simulate_target_fast
+
+    target, genes, guides, start, stop = unit
+    shared = _SHARED
+    at = time.perf_counter()
+    frame = simulate_target_fast(
+        shared["sim"],
+        target,
+        genes,
+        guides,
+        effect_size=shared["effect_size"],
+        reps=range(start, stop),
+        seed=shared["seed"],
+        params=shared["params"],
+        grna_csc=shared["grna_csc"],
+        guide_spread_c=shared["guide_spread_c"],
+        expression_model=shared["expression_model"],
+    )
+    return target, frame, time.perf_counter() - at
+
+
+def _fast_units(genes_of, guides_of, reps: range, workers: int) -> list:
+    """Each target's simulations in contiguous chunks, enough of them to keep `workers` busy.
+
+    A chunk pays the per-target setup once (its permutations and their matrices, about 0.3 s), so
+    chunks are as large as the worker count allows: one per target when targets outnumber workers,
+    and a single-target run at --n-jobs 4 in four. Chunk boundaries cannot move a result: each
+    simulation draws its counts from its own seeded stream, every simulation of a target shares the
+    one permutation set, and every fit and product column is computed on its own.
+    """
+    per_target = min(len(reps), max(1, -(-workers // max(1, len(genes_of)))))
+    size = -(-len(reps) // per_target)
+    return [
+        (t, list(g), guides_of[t], start, min(start + size, reps.stop))
+        for t, g in genes_of.items()
+        for start in range(reps.start, reps.stop, size)
+    ]
+
+
 def _load_shared(prepared: Path, settings: dict) -> None:
     sim = read_sim_input(prepared / "sim_input.h5")
     _SHARED.update(
@@ -103,7 +153,7 @@ def _init_spawned(prepared: Path, settings: dict) -> None:
     _load_shared(prepared, settings)
 
 
-def _map_units(units: list, workers: int, prepared: Path, settings: dict) -> list:
+def _map_units(units: list, workers: int, prepared: Path, settings: dict, fn=_run_unit) -> list:
     """Run the units in parallel, in PROCESSES, returning them in submission order.
 
     Never threads: pysceptre's discovery call keeps its working state in a module global,
@@ -116,7 +166,7 @@ def _map_units(units: list, workers: int, prepared: Path, settings: dict) -> lis
     so the output does not depend on the worker count or the order the units finish in.
     """
     if workers <= 1 or len(units) <= 1:
-        return [_run_unit(u) for u in units]
+        return [fn(u) for u in units]
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
 
@@ -140,7 +190,7 @@ def _map_units(units: list, workers: int, prepared: Path, settings: dict) -> lis
 
     try:
         with pool:
-            return list(pool.map(_run_unit, units))
+            return list(pool.map(fn, units))
     except BrokenProcessPool:
         print(
             "ERROR: a worker process was killed (most often out of memory). Exiting 137 so the "
@@ -223,6 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         "identical [default %(default)s]",
     )
     parser.add_argument(
+        "--driver",
+        choices=DRIVERS,
+        default="engine",
+        help="'fast' tests all of a target's simulations together, building its permutation "
+        "matrices once; the output is byte-identical to 'engine' with --permutations per-target "
+        "--nulls sparse. It needs --permutations per-target and a permutation-test screen, and "
+        "always computes the nulls by the sparse route [default %(default)s]",
+    )
+    parser.add_argument(
         "--expression-model",
         choices=("fitted", "size_factor"),
         default="fitted",
@@ -251,10 +310,22 @@ def main(argv: list[str] | None = None) -> int:
         )
     if not 0.0 <= args.guide_spread_c < 2.0:
         raise SystemExit(f"--guide-spread-c must be in [0, 2) (got {args.guide_spread_c})")
+    if args.driver == "fast" and args.permutations != "per-target":
+        raise SystemExit(
+            "--driver fast needs --permutations per-target: it builds a target's permutation "
+            "matrices once for all of its simulations, which is the engine's test only when the "
+            "simulations share one permutation set. Add --permutations per-target, or use "
+            "--driver engine."
+        )
 
     started = time.perf_counter()
     sim = read_sim_input(args.prepared / "sim_input.h5")
     params = AnalysisParams.from_analysis_mode(args.prepared / "analysis_mode.tsv")
+    if args.driver == "fast" and params.resampling_mechanism != "permutations":
+        raise SystemExit(
+            f"--driver fast runs the permutation test only, and this screen used "
+            f"{params.resampling_mechanism!r}. Use --driver engine."
+        )
     design = pd.read_csv(args.prepared / "grna_targets.tsv", sep="\t")
     split = pd.read_csv(args.pairs, sep="\t")
     for column in ("grna_target", "response_id"):
@@ -271,8 +342,12 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(genes_of)} targets / {len(split)} pairs, replicates {reps.start}-{reps.stop - 1}, "
         f"effect size {args.effect_size} (relative expression {1 - args.effect_size:g})\n"
         f"  baseline: {args.expression_model}, permutations {args.permutations}, "
-        f"nulls {args.nulls}, "
-        f"n_jobs {args.n_jobs}, "
+        + (
+            f"nulls {args.nulls}, "
+            if args.driver == "engine"
+            else "driver fast, nulls sparse (the fast driver's only route), "
+        )
+        + f"n_jobs {args.n_jobs}, "
         f"B1/B2/B3 {params.B1}/{params.B2}/{params.B3}, side_code {params.side_code}"
     )
 
@@ -295,10 +370,16 @@ def main(argv: list[str] | None = None) -> int:
         nulls=args.nulls,
     )
     _SHARED.update(sim=sim, params=params, grna_csc=sim.grna_perts.tocsc(), **settings)
-    units = [(t, list(g), guides_of[t], r) for t, g in genes_of.items() for r in reps]
-    workers = min(max(args.n_jobs, 1), len(units))
-    print(f"  {len(units)} (target, replicate) units on {workers} worker(s)")
-    results = _map_units(units, workers, args.prepared, settings)
+    if args.driver == "fast":
+        units = _fast_units(genes_of, guides_of, reps, max(args.n_jobs, 1))
+        workers = min(max(args.n_jobs, 1), len(units))
+        print(f"  {len(units)} (target, simulation chunk) units on {workers} worker(s)")
+        results = _map_units(units, workers, args.prepared, settings, fn=_run_fast_unit)
+    else:
+        units = [(t, list(g), guides_of[t], r) for t, g in genes_of.items() for r in reps]
+        workers = min(max(args.n_jobs, 1), len(units))
+        print(f"  {len(units)} (target, replicate) units on {workers} worker(s)")
+        results = _map_units(units, workers, args.prepared, settings)
 
     by_target: dict[str, list] = {}
     for target, frame, elapsed in results:

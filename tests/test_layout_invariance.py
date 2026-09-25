@@ -48,6 +48,7 @@ def simulate(
     n_jobs: int = 1,
     permutations: str = "per-replicate",
     nulls: str = "scan",
+    driver: str = "engine",
 ):
     subprocess.run(
         [
@@ -72,6 +73,8 @@ def simulate(
             permutations,
             "--nulls",
             nulls,
+            "--driver",
+            driver,
             "--out",
             str(out),
         ],
@@ -176,3 +179,25 @@ def test_sparse_and_scan_nulls_give_identical_output(prepared, split, tmp_path, 
     simulate(prepared, scan, split, reps=4, offset=0, permutations=permutations, nulls="scan")
     simulate(prepared, sparse, split, reps=4, offset=0, permutations=permutations, nulls="sparse")
     assert scan.read_bytes() == sparse.read_bytes()
+
+
+def test_the_fast_driver_writes_the_engines_bytes(prepared, split, tmp_path):
+    """--driver fast is a layout change only: the file the engine writes with --permutations
+    per-target --nulls sparse, byte for byte, at one worker and at two (which splits the target's
+    simulations into chunks). This is also what catches a pysceptre update that the fast driver's
+    reproduction of pysceptre's per-gene steps no longer matches."""
+    engine = tmp_path / "engine.tsv"
+    simulate(prepared, engine, split, reps=4, offset=0, permutations="per-target", nulls="sparse")
+    for n_jobs in (1, 2):
+        fast = tmp_path / f"fast_j{n_jobs}.tsv"
+        simulate(
+            prepared,
+            fast,
+            split,
+            reps=4,
+            offset=0,
+            n_jobs=n_jobs,
+            permutations="per-target",
+            driver="fast",
+        )
+        assert engine.read_bytes() == fast.read_bytes()
