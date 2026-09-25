@@ -822,3 +822,90 @@ produced before them, as was §4 of `perturbplan_comparison.md`. Nothing was pub
 regeneration rather than a correction — but it is a full sweep, and it is recorded in
 `WattEG-paper/docs/bug_expression_scale_input.md` rather than here because it is the paper's work,
 not the port's.
+
+## 13. Next: both estimands, and cis + trans in under an hour
+
+Decided with the owner on 2026-09-25. Items 1 and 2 are settled; items 3-5 wait on the speed
+measurements in progress, and their numbers are estimates until then.
+
+**What does not change: the simulation keeps the full design.** Each replicate runs the screen's
+actual test on its actual cells, covariates, guide assignment and threshold, including sceptre's
+permutation test with its escalation. Every speed-up below has to preserve that. None of them
+approximates the design.
+
+### 1. A second estimand: random guide effects
+
+`--estimand fixed | random`, default `fixed`, in both implementations so Stage B can check it.
+
+| | `fixed` (today) | `random` |
+|---|---|---|
+| guide knockdown | Beta, mean es, sd `c * es * (1 - es)` | the same draw |
+| element's realised mean over its perturbed cells | pinned to es in every replicate | left where the draw puts it |
+| question answered | power for an element whose effect *is* es | power for an element whose effect is es *on average* |
+| PerturbPlan setting that asks the same | `fold_change_sd = 0` | `fold_change_sd = c * es * (1 - es)` (0.0829 at es 0.15) |
+
+**Implementation.** Skip the pin and keep everything else.
+- **Python:** `watteg.perturbation.effect_size_matrix` skips `_pin_to_mean`.
+- **R:** `simulate_effect_sizes` skips `center_effect_size_matrix`.
+
+The control-cells-at-1 assertion stays in both. The estimand is written into every output, so a
+power table always says which question it answers.
+
+**Why it is safe now and was not before.** The unpinned spread is zero at es = 0. The old absolute
+`N(1 - es, 0.13)` gave a null element random effects, and "detected" it about 20 % of the time on
+highly expressed genes. With the Beta spread the null arm is identical under both estimands.
+
+**Checks:**
+- es = 0 gives byte-identical output under both estimands.
+- Under `random`, the realised element mean has sd ≈ `c * es * (1 - es) * sqrt(sum n_g^2) / sum n_g`
+  over the guides' cell counts `n_g`: the variance of a cell-weighted mean, tested on the shared
+  fixture.
+- `fixed` output is unchanged by the option's existence.
+- A cis sweep under `random`, scored against PerturbPlan at `fold_change_sd = 0.0829`, compares the
+  same question at the same per-guide spread in both methods (WattEG-paper,
+  `docs/perturbplan_comparison.md`).
+
+### 2. One permutation set per target, drawn from the seed
+
+All replicates of a target are tested against one permutation set, keyed on (seed, target, effect
+size), not on the replicate. This is what sceptre itself does: its sampler reseeds
+`mt19937(4)` on every call (pinned commit 3ba046b), so R's replicates already shared one fixed set,
+as did the real screen. A per-target draw from the run's seed was chosen over sceptre's fixed set
+so that one draw is not shared by every target of the same size. Outputs change relative to earlier
+Python runs; that is expected and is recorded in `methods.md`.
+
+### 3. A faster driver (pending measurement)
+
+A read-only map of pysceptre's discovery call found work that is repeated for no reason in the
+simulation's call shape (one target, one replicate per call). All of it is avoidable without
+editing pysceptre, by driving its public low-level functions (`fit_all_genes`,
+`compute_precomputation_pieces`, `stack_pieces`, `run_low_level_test_full` with
+`null_statistics_fn`):
+
+| work today | cost (laptop, cis profile) | replacement |
+|---|---|---|
+| all 30,497 permutations drawn per call, one `rng.choice` at a time | ~0.24 s per call | drawn once per target (item 2) |
+| stage-2 null: gather + cumsum over a (4,999, n_trt, 14) array to read one column | ~125 ms per escalated pair | one sparse permutation matrix per target and stage, `P @ [stacked_1 | ... | stacked_K]` for every gene x replicate at once; bit-identical per column (checked) |
+| gene fits one replicate at a time, plus a duplicated `compute_precomputation_pieces` | ~44 + 5 ms per gene per replicate | fits batched across a target's replicates; not guaranteed bit-identical on Linux, so checked to tolerance |
+
+Estimated effect: ~180 ms to ~35 ms per escalated pair-replicate. **Exactness criterion:** on the
+same permutation set, the fast driver's p-values match the current engine's per pair, bit for bit
+where the operations are the same and to a stated tolerance where the fits are batched.
+
+### 4. Task shape and resources
+
+- **A task holds whole targets with all their replicates,** and writes per-pair power directly. The
+  74M-row consolidation and power steps become optional, kept only for a per-replicate table when
+  asked for.
+- **8 workers per task** (`a85188a`, unpushed): cis tasks fit in 8 GB. trans at 4 workers
+  averaged ~7.4 GB per task, so trans memory is set from a measurement with the fast driver, not
+  from the discovery benchmark.
+- **Task sizing:** roughly 15-20 min at 8 workers, within the 10,000 preemptible-CPU quota.
+- **Machine family:** e2 cores ran ~3x slower than the laptop; n2d or c2d are measured on one small
+  cloud run before a sweep.
+
+### 5. The target
+
+Both moi5 sweeps, cis (3.3M pair-tests) and trans (74M), in under an hour of wall clock, about 30-40
+min of it simulation. On the estimates above this needs a pair-test of ≤ 0.15-0.2 s per vCPU on
+cloud against 0.55 s today. The measurements decide whether items 3-4 reach it.
