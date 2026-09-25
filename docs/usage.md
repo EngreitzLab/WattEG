@@ -254,3 +254,9 @@ in step 3. A task's cost follows `intercept + slope × pairs`, so:
 
 `--n-jobs` buys wall clock rather than CPU time: measured on a 10-performance-core machine, 8
 workers gave 2.5× the wall-clock speed for 1.5× the CPU, and 14 was slower than 8.
+
+A task's wall time is bounded by its largest target, whose simulations are one unit of work. On one
+machine, several narrower tasks at once therefore beat one wide one: on a 14-core laptop, three
+330-pair cis tasks at 4 workers each finished in 727 s, against 296 s each at 8 workers one after
+another. For a local sweep, `-profile local --power_simulation_cpus 4` with Nextflow's
+`executor.cpus = 12` runs three at once; each took ~4.2 GB on macOS.

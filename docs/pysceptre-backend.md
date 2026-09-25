@@ -830,7 +830,7 @@ measurements in progress, and their numbers are estimates until then.
 
 **Status, 2026-09-25 (end of day).** Done: item 1 in Python (R still to do); item 2 (`e6c6db6`);
 3a (`3ea5baa`); 3b, the fast driver (`288cb0f`); 3c, fit reuse; item 4's per-pair power inside the
-task. **The defaults are now the fast configuration:** `--permutations
+task, and its memory measurement. **The defaults are now the fast configuration:** `--permutations
 per-target`, `--nulls sparse`, `--driver fast`, `--null-fits reuse` (CLI and Nextflow), with the
 engine, `refit`, `scan` and `per-replicate` still selectable. A CRT screen needs `--driver engine
 --null-fits refit`, because the fast driver runs the permutation test only. Not done: 3d (waits on
@@ -1056,6 +1056,26 @@ about half of a TSV's values (285,883 of 500,000 measured), so the rows are now 
 `float_precision="round_trip"`. The stub DAG passes in all four shapes (default, kept rows,
 chunked simulations, fast driver with fits), and a tiny real run passes on moi5 cis (defaults) and
 on day0 (a CRT screen, `--driver engine --null_fits refit`).
+
+**Measured 2026-09-25: memory and time of a task under the new defaults.** A 330-pair moi5 cis slice
+(`watteg-split-pairs --n-splits 100`, split 1: 29 targets, 185 genes), 100 simulations, fits read
+from a `FIT_NULL_MODELS` file, per-pair counts only:
+
+| | workers | peak memory | wall | worker time per pair-test |
+|---|---:|---:|---:|---:|
+| Linux container (fork; cgroup `memory.peak`) | 8 | **3.38 GB** | 278 s | -- |
+| macOS laptop (spawn; summed RSS of the tree) | 8 | 9.73 GB | 296 s | 47.5 ms |
+| macOS laptop | 12 | 10.2 GB | 272 s | 54.1 ms |
+| macOS laptop, 3 such tasks at once | 3 x 4 | 4.1-4.2 GB each | 727 s for all 3 | 70 ms |
+| `FIT_NULL_MODELS`, 244 genes, Linux | 8 | 3.04 GB | 59 s (24 simulations) | -- |
+| `FIT_NULL_MODELS`, 244 genes x 100, macOS | 8 | 6.9 GB | 208 s | -- |
+
+`power_simulation_memory` stays **8 GB**: 2.4x the Linux peak, and no 8-vCPU predefined machine has
+less. The macOS numbers are local-run numbers: a spawned worker loads its own copy of the inputs
+(~0.6 GB) where a forked one shares the parent's. A task's wall time is bounded by its largest
+target (221 s of the 296 s at 8 workers), so on one machine several smaller tasks at once use the
+cores better than one wide task: 3 x 4 workers finished 3 slices in 727 s against 3 x 296 s one
+after another. trans (~250 genes per target) is not measured under this configuration.
 
 - **A task holds whole targets with all their replicates,** and writes per-pair power directly. The
   74M-row consolidation and power steps become optional, kept only for a per-replicate table when
