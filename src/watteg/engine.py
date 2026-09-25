@@ -38,10 +38,12 @@ from .seeds import SETUP_REP, derive_seed, rng_for
 from .simulate import draw_counts
 
 DEFAULT_GUIDE_SPREAD_C = 0.65
-# How replicates of one target get their permutations. "per-replicate" draws a fresh set for every
-# replicate (the behaviour up to 2026-09-25). "per-target" gives every replicate of a target the
-# same set, drawn once from the run's seed -- what the owner chose on 2026-09-25, and close to what
-# sceptre does: its sampler reseeds mt19937(4) on every call, so R's replicates share one fixed set.
+# How the simulations of one target get their permutations. "per-replicate" draws a fresh set for
+# every simulation (the behaviour up to 2026-09-25). "per-target" gives every simulation of a target
+# the same set, drawn once from the run's seed -- what the owner chose on 2026-09-25, the CLI's
+# default since, and close to what sceptre does: its sampler reseeds mt19937(4) on every call, so
+# R's simulations share one fixed set. This function's own defaults stay the engine's original
+# configuration, which the tests compare against; the CLI passes what it was asked for.
 PERMUTATION_MODES = ("per-replicate", "per-target")
 
 # How the permutation nulls are computed. Results are identical either way; only speed differs.
@@ -52,7 +54,7 @@ PERMUTATION_MODES = ("per-replicate", "per-target")
 # takes whenever the scan would be too large: a sparse indicator matrix times the gene's pieces.
 # Measured 2026-09-25 (docs/pysceptre-backend.md, section 13, item 3a): 119.5 -> 17.7 ms per
 # escalated pair at stage 2, 12.4 -> 1.9 ms at stage 1, 2.1x on cis and 2.3x on trans overall,
-# with p-values, z-statistics and stages identical on 3,750 pair-tests.
+# with p-values, z-statistics and stages identical on 3,750 pair-tests. The CLI's default since.
 NULL_ROUTES = ("sparse", "scan")
 
 

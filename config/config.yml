@@ -48,6 +48,20 @@ guide_spread_c: 0.65
 # with fold_change_sd = c * es * (1 - es)). Identical at effect size 0. Written into every output.
 estimand: fixed
 
+# The simulation's configuration: the fast one, the default since 2026-09-25, each part measured
+# before it was adopted (docs/pysceptre-backend.md, section 13; docs/methods.md).
+#   permutations  per-target: one permutation set per target, drawn from the seed (per-replicate:
+#                 a fresh set per simulation, engine only)
+#   nulls         sparse: pysceptre's draw-matrix route, identical results (scan: its default)
+#   driver        fast: a target's simulations tested together, byte-identical to the engine
+#   null_fits     reuse: each gene's null model fitted once per simulation (FIT_NULL_MODELS) and
+#                 shared across targets (refit: per target, exactly; what driver engine needs)
+# The fast driver runs the permutation test only: a CRT screen needs driver engine, null_fits refit.
+permutations: per-target
+nulls: sparse
+driver: fast
+null_fits: reuse
+
 # Parallelisation only; does not affect results. Seeds derive from
 # (seed, target, rep, effect_size), so output is invariant to the split layout.
 n_splits: 1000

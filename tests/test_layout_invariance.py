@@ -264,3 +264,17 @@ def test_reused_null_fits_are_the_same_from_a_file_or_made_in_the_task(prepared,
             extra=("--null-fits-file", str(fits)),
         )
     assert b"seed 7" in caught.value.stderr + caught.value.stdout
+
+
+def test_the_defaults_are_the_fast_configuration(prepared, split, tmp_path):
+    """No flags at all runs --permutations per-target --nulls sparse --driver fast --null-fits
+    reuse, byte for byte: the defaults the documentation states are the ones the CLI has."""
+    base = [sys.executable, "-m", "watteg.cli.run_power_simulation", "--prepared", str(prepared)]
+    base += ["--pairs", str(split), "--effect-size", "0.15", "--reps", "3", "--seed", "7"]
+    subprocess.run([*base, "--out", str(tmp_path / "d.tsv")], check=True, capture_output=True)
+    fast = ["--permutations", "per-target", "--nulls", "sparse", "--driver", "fast"]
+    fast += ["--null-fits", "reuse", "--estimand", "fixed", "--n-jobs", "8"]
+    subprocess.run(
+        [*base, *fast, "--out", str(tmp_path / "e.tsv")], check=True, capture_output=True
+    )
+    assert (tmp_path / "d.tsv").read_bytes() == (tmp_path / "e.tsv").read_bytes()

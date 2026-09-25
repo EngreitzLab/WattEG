@@ -46,5 +46,11 @@ test_max_splits: 3
 
 reps_per_chunk: 2
 
+# The synthetic object is a CRT screen, and the fast driver (the default) runs the permutation test
+# only; so this runs the engine, which refits every gene itself. A stub run checks the default
+# DAG, FIT_NULL_MODELS included, with: --driver fast --null_fits reuse.
+driver: engine
+null_fits: refit
+
 power_threshold: 0.8
 conf_level: 0.95

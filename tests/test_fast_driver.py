@@ -217,7 +217,7 @@ def test_the_cli_refuses_the_fast_driver_without_per_target_permutations(tmp_pat
     args = ["--prepared", str(tmp_path), "--pairs", str(tmp_path / "p.tsv")]
     args += ["--effect-size", "0.1", "--reps", "2", "--seed", "1", "--out", str(tmp_path / "o")]
     with pytest.raises(SystemExit, match="needs --permutations per-target"):
-        main([*args, "--driver", "fast"])
+        main([*args, "--permutations", "per-replicate"])
 
 
 # --- fit reuse (--null-fits reuse) -------------------------------------------------------------
@@ -343,8 +343,9 @@ def test_the_cli_refuses_reuse_without_the_fast_driver(tmp_path):
 
     args = ["--prepared", str(tmp_path), "--pairs", str(tmp_path / "p.tsv")]
     args += ["--effect-size", "0.1", "--reps", "2", "--seed", "1", "--out", str(tmp_path / "o")]
+    # reuse is the default, so the engine alone is refused until it is told to refit.
     with pytest.raises(SystemExit, match="needs --driver fast"):
-        main([*args, "--driver", "engine", "--null-fits", "reuse"])
+        main([*args, "--driver", "engine"])
     with pytest.raises(SystemExit, match="read only under --null-fits reuse"):
         main([*args, "--null-fits", "refit", "--null-fits-file", str(tmp_path / "f.h5")])
 

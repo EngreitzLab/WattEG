@@ -1,8 +1,9 @@
 """The same test as `engine.simulate_target`, laid out per target instead of per simulation.
 
-Opt-in (`--driver fast`), and only for `--permutations per-target`: its output is byte-identical to
-the engine's with `--permutations per-target --nulls sparse`, and it gets there by doing the same
-arithmetic in a different order of loops, never by doing different arithmetic.
+The default driver since 2026-09-25 (`--driver fast`), and only for `--permutations per-target`
+(also the default): with `null_fits=None` its output is byte-identical to the engine's with
+`--permutations per-target --nulls sparse`, and it gets there by doing the same arithmetic in a
+different order of loops, never by doing different arithmetic.
 
 **What the engine repeats.** It calls pysceptre once per (target, simulation). Under per-target
 permutations every one of a target's calls draws the same 30,497 permutations from the same seed,

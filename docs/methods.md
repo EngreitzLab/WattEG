@@ -204,8 +204,8 @@ no power at any theta.
 
 ## Deciding whether a simulation "detects" the pair
 
-The simulated counts are handed to sceptre's `run_discovery_analysis()` with the pair table narrowed
-to the target under test, and a simulation counts as a detection when
+The simulated counts are tested with the screen's own test, target by target (next section),
+and a simulation counts as a detection when
 
 ```
 p_value < threshold   AND   log_2_fold_change < 0
@@ -216,17 +216,56 @@ discovery analysis**, read from `@discovery_result`. Using the empirical thresho
 `alpha` matters: it encodes the correction actually applied to your data, at your number of tests.
 `--alpha` exists only for objects that have no discovery results.
 
-At effect size 0 (the null arm) the same rule measures the rate of false calls **in the knockdown
+At effect size 0 (no simulated effect) the same rule measures the rate of false calls **in the knockdown
 direction**. That is α for a left-sided test, but only about α/2 for a two-sided one, because half
 of the two-sided false calls have a positive fold change.
 
-## Null-model fits
+## Running the screen's test on each simulation
+
+Each simulation runs the screen's actual test on its actual cells, covariates, guide assignment and
+threshold, including sceptre's permutation test with its escalation through three stages (pysceptre,
+with the screen's own `B1`/`B2`/`B3` and side). The four settings below decide how that is laid out.
+Each was measured before it became the default (2026-09-25; `docs/pysceptre-backend.md`, section 13).
+Three of them change no result at all; the last is an approximation, and says so.
+
+### One permutation set per target (`--permutations per-target`)
+
+All simulations of a target are tested against one permutation set, drawn from a stream keyed on
+(seed, target, effect size) and never on the simulation. That is what sceptre itself does: its
+sampler reseeds `mt19937(4)` on every call (pinned commit 3ba046b), so the R implementation's
+simulations already shared one fixed set, as the real screen's targets did. A per-target draw from
+the run's seed was chosen over sceptre's fixed set so that targets of the same size do not all share
+one draw. The simulated counts are the same either way; the p-values move by the Monte Carlo error
+of the permutation test. `--permutations per-replicate`, one fresh set per simulation, was the
+behaviour until 2026-09-25 and remains available with the engine.
+
+### How the permutation nulls are computed (`--nulls sparse`)
+
+pysceptre has two routes to a stage's null statistics. Its default for permutations, a prefix scan,
+gathers a (B, n_trt, 14) array and takes a running sum over it, so that one set of draws can serve
+many targets of different sizes. A simulation's call holds one target, so the running sum is thrown
+away but for one column (227 MB at stage 2 for a 406-cell target). The sparse route multiplies a
+sparse indicator matrix by the gene's pieces; pysceptre already takes it whenever the scan would be
+too large. WattEG selects it through pysceptre's own documented signal, without changing
+pysceptre. The p-values, z-statistics and stages were identical on 3,750 pair-tests, and every
+output file is byte-identical; a stage-2 null went from 119.5 to 17.7 ms.
+
+### Testing a target's simulations together (`--driver fast`)
+
+The engine calls pysceptre once per (target, simulation), and each call redraws the same
+permutations, rebuilds the same matrices and outer products, and computes each gene's pieces twice.
+The fast driver does that work once per target and runs pysceptre's own per-gene steps
+(`run_low_level_test_full`, its draw-matrix route, its fits) for every simulation. Its output is the
+engine's under `per-target` and `sparse`, byte for byte, which the tests check against the engine on
+every run.
+
+### Null-model fits
 
 sceptre's test needs each gene's null model: the Poisson GLM on the covariates plus the
 negative-binomial theta, fitted to all cells. In the real screen each gene is fitted once and serves
 the ~135 targets it is paired with. A simulation can do the same or refit, and the two are options:
 
-- **`--null-fits reuse`** (R's `FIT_NULL_MODELS` approximation). Once per (gene, simulation), the
+- **`--null-fits reuse`**, the default (R's `FIT_NULL_MODELS` approximation). Once per (gene, simulation), the
   gene's counts are drawn with no knockdown, from their own stream keyed
   `(seed, "__null_fit__|" + gene, simulation, 0)`, and pysceptre's own gene fit is run on them. Every
   target the gene is tested with in that simulation, at every effect size, uses that fit; the score

@@ -828,6 +828,13 @@ not the port's.
 Decided with the owner on 2026-09-25. Items 1 and 2 are settled; items 3-5 wait on the speed
 measurements in progress, and their numbers are estimates until then.
 
+**Status, 2026-09-25 (end of day).** Done: item 1 in Python (R still to do); item 2 (`e6c6db6`);
+3a (`3ea5baa`); 3b, the fast driver (`288cb0f`); 3c, fit reuse. **The defaults are now the fast configuration:** `--permutations
+per-target`, `--nulls sparse`, `--driver fast`, `--null-fits reuse` (CLI and Nextflow), with the
+engine, `refit`, `scan` and `per-replicate` still selectable. A CRT screen needs `--driver engine
+--null-fits refit`, because the fast driver runs the permutation test only. Not done: 3d (waits on
+a pysceptre release), item 4, item 5 (a cloud measurement), item 6 (not to be run until decided).
+
 **What does not change: the simulation keeps the full design.** Each replicate runs the screen's
 actual test on its actual cells, covariates, guide assignment and threshold, including sceptre's
 permutation test with its escalation. Every speed-up below has to preserve that. None of them
@@ -882,7 +889,10 @@ highly expressed genes. With the Beta spread the null arm is identical under bot
   same question at the same per-guide spread in both methods (WattEG-paper,
   `docs/perturbplan_comparison.md`).
 
-### 2. One permutation set per target, drawn from the seed
+### 2. One permutation set per target, drawn from the seed -- done, and the default
+
+Done in `e6c6db6`; the default since the fast configuration was adopted (2026-09-25), and recorded
+in `methods.md`.
 
 All replicates of a target are tested against one permutation set, keyed on (seed, target, effect
 size), not on the replicate. This is what sceptre itself does: its sampler reseeds
@@ -893,7 +903,9 @@ Python runs; that is expected and is recorded in `methods.md`.
 
 ### 3. A faster driver
 
-#### 3a. First: take pysceptre's sparse route for the permutation nulls (measured, bit-identical)
+#### 3a. First: take pysceptre's sparse route for the permutation nulls (measured, bit-identical) -- done
+
+Step 1 done in `3ea5baa` (`--nulls sparse`, now the default); step 2 is the fast driver (`288cb0f`).
 
 **The problem.** In a one-target call pysceptre computes the stage-1 and stage-2 permutation nulls
 by a scan: it gathers a (B, n_trt, 14) array (227 MB at stage 2, n_trt = 406) and takes a running
@@ -930,7 +942,7 @@ max |dp| = 0.
 If pysceptre's owners want it, the same finding applies upstream: for a single target, the scan is
 slower than the sparse route at every stage. That is a note for them, not a change made here.
 
-#### 3b. The rest of the driver
+#### 3b. The rest of the driver -- done (`288cb0f`, `--driver fast`, now the default)
 
 A read-only map of pysceptre's discovery call found work that is repeated for no reason in the
 simulation's call shape (one target, one replicate per call). All of it is avoidable without

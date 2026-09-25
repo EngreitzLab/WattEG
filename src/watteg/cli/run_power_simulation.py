@@ -1,16 +1,27 @@
-"""Run the power simulation for one split, one effect size, one chunk of replicates.
+"""Run the power simulation for one split, one effect size, one chunk of simulations.
 
     watteg-run-power-simulation --prepared prepared/ --pairs split_01.tsv \
-        --effect-size 0.15 --reps 20 --rep-offset 0 --seed 1 --out sim.tsv
+        --effect-size 0.15 --reps 100 --seed 1 --null-fits-file null_fits.h5 --out sim.tsv
 
-For each target in the split and each replicate, this simulates a count matrix
+For each target in the split and each simulation, this simulates a count matrix
 under the given effect size and asks the screen's own test whether it would have
-called the association. The fraction of replicates in which it would is the
+called the association. The fraction of simulations in which it would is the
 power, computed downstream.
 
-Output columns match `src/run_power_simulation.R`'s, so the two implementations'
-results can be compared without a conversion step and so downstream readers do
-not care which produced a file.
+**The defaults (2026-09-25)** are the fast configuration, each measured before it
+was adopted (docs/pysceptre-backend.md, section 13): `--permutations per-target`
+(one permutation set per target, as sceptre effectively uses), `--nulls sparse`
+(pysceptre's draw-matrix route, identical results), `--driver fast` (a target's
+simulations tested together, byte-identical to the engine under those two) and
+`--null-fits reuse` (each gene's null model fitted once per simulation and shared
+across targets; see watteg/null_fits.py). The previous configuration stays
+selectable: `--driver engine --null-fits refit`, with `--permutations
+per-replicate --nulls scan` if wanted. The fast driver runs the permutation test
+only, so a CRT screen needs `--driver engine --null-fits refit`.
+
+Output columns match `src/run_power_simulation.R`'s, plus `estimand`, so the two
+implementations' results can be compared without a conversion step and so
+downstream readers do not care which produced a file.
 """
 
 from __future__ import annotations
@@ -41,7 +52,7 @@ from watteg.workers import map_units
 # matrices are shared only when the simulations share one permutation set.
 DRIVERS = ("engine", "fast")
 
-# What a reader needs, and nothing more. At 100 replicates x 34,886 pairs x six
+# What a reader needs, and nothing more. At 100 simulations x 34,886 pairs x six
 # effect sizes the columns nothing reads were 39% of a 3 GB output.
 KEEP = [
     "grna_target",
@@ -65,7 +76,7 @@ NULL_FIT_MODES = ("reuse", "refit")
 
 
 def _run_unit(unit: tuple) -> tuple:
-    """Simulate and test one (target, replicate). pysceptre gets one worker: the task's
+    """Simulate and test one (target, simulation). pysceptre gets one worker: the task's
     workers are already busy with other units, and nesting pools would oversubscribe."""
     target, genes, guides, rep = unit
     shared = _SHARED
@@ -226,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         "--rep-offset",
         type=int,
         default=0,
-        help="replicates already covered by earlier chunks, so `rep` stays unique across them",
+        help="simulations already covered by earlier chunks, so `rep` stays unique across them",
     )
     parser.add_argument(
         "--seed",
@@ -255,42 +266,47 @@ def main(argv: list[str] | None = None) -> int:
         "--n-jobs",
         type=int,
         default=8,
-        help="workers for this task. Each (target, replicate) is one unit of work, so cis "
-        "targets with a handful of genes still keep every worker busy [default %(default)s]",
+        help="workers for this task. A unit of work is a (target, chunk of simulations) under "
+        "the fast driver and a (target, simulation) under the engine, so cis targets with a "
+        "handful of genes still keep every worker busy [default %(default)s]",
     )
     parser.add_argument(
         "--permutations",
         choices=PERMUTATION_MODES,
-        default="per-replicate",
-        help="'per-target' tests every replicate of a target against one permutation set drawn "
+        default="per-target",
+        help="'per-target' tests every simulation of a target against one permutation set drawn "
         "from the seed, as sceptre effectively does; 'per-replicate' draws a fresh set for each "
-        "replicate [default %(default)s]. The simulated counts are the same either way",
+        "simulation, and needs --driver engine [default %(default)s]. The simulated counts are "
+        "the same either way",
     )
     parser.add_argument(
         "--nulls",
         choices=NULL_ROUTES,
-        default="scan",
-        help="how the permutation nulls are computed: 'sparse' is pysceptre's draw-matrix route, "
-        "about twice as fast for one-target calls; 'scan' is its default. The results are "
-        "identical [default %(default)s]",
+        default="sparse",
+        help="how the engine computes the permutation nulls: 'sparse' is pysceptre's draw-matrix "
+        "route, about twice as fast for one-target calls; 'scan' is pysceptre's own default. The "
+        "results are identical. The fast driver always takes the sparse route "
+        "[default %(default)s]",
     )
     parser.add_argument(
         "--driver",
         choices=DRIVERS,
-        default="engine",
+        default="fast",
         help="'fast' tests all of a target's simulations together, building its permutation "
         "matrices once; the output is byte-identical to 'engine' with --permutations per-target "
-        "--nulls sparse. It needs --permutations per-target and a permutation-test screen, and "
-        "always computes the nulls by the sparse route [default %(default)s]",
+        "--nulls sparse. It needs --permutations per-target and a permutation-test screen (a "
+        "CRT screen needs --driver engine --null-fits refit), and always computes the nulls by "
+        "the sparse route [default %(default)s]",
     )
     parser.add_argument(
         "--null-fits",
         choices=NULL_FIT_MODES,
-        default="refit",
-        help="with --driver fast: 'reuse' fits each gene's null model once per simulation, on an "
-        "independent draw with no knockdown, and uses that fit for every target the gene is "
-        "tested against (R's FIT_NULL_MODELS approximation, docs/methods.md); 'refit' fits it on "
-        "each simulation's own counts for every target, as the engine does [default %(default)s]",
+        default="reuse",
+        help="'reuse' fits each gene's null model once per simulation, on an independent draw "
+        "with no knockdown, and uses that fit for every target the gene is tested against (R's "
+        "FIT_NULL_MODELS approximation, docs/methods.md); it needs --driver fast. 'refit' fits "
+        "it on each simulation's own counts for every target, exactly, and is what --driver "
+        "engine does [default %(default)s]",
     )
     parser.add_argument(
         "--null-fits-file",
@@ -331,16 +347,17 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"--guide-spread-c must be in [0, 2) (got {args.guide_spread_c})")
     if args.driver == "fast" and args.permutations != "per-target":
         raise SystemExit(
-            "--driver fast needs --permutations per-target: it builds a target's permutation "
-            "matrices once for all of its simulations, which is the engine's test only when the "
-            "simulations share one permutation set. Add --permutations per-target, or use "
-            "--driver engine."
+            "--driver fast (the default) needs --permutations per-target: it builds a target's "
+            "permutation matrices once for all of its simulations, which is the engine's test "
+            "only when the simulations share one permutation set. Add --permutations per-target, "
+            "or use --driver engine --null-fits refit."
         )
 
     if args.null_fits == "reuse" and args.driver != "fast":
         raise SystemExit(
-            "--null-fits reuse needs --driver fast: the engine calls pysceptre's discovery "
-            "entry point, which fits every gene itself. Use --null-fits refit with --driver engine."
+            "--null-fits reuse (the default) needs --driver fast: the engine calls pysceptre's "
+            "discovery entry point, which fits every gene itself. Add --null-fits refit to run "
+            "the engine."
         )
     if args.null_fits_file is not None and args.null_fits != "reuse":
         raise SystemExit("--null-fits-file is read only under --null-fits reuse")
@@ -350,8 +367,8 @@ def main(argv: list[str] | None = None) -> int:
     params = AnalysisParams.from_analysis_mode(args.prepared / "analysis_mode.tsv")
     if args.driver == "fast" and params.resampling_mechanism != "permutations":
         raise SystemExit(
-            f"--driver fast runs the permutation test only, and this screen used "
-            f"{params.resampling_mechanism!r}. Use --driver engine."
+            f"--driver fast (the default) runs the permutation test only, and this screen used "
+            f"{params.resampling_mechanism!r}. Use --driver engine --null-fits refit."
         )
     design = pd.read_csv(args.prepared / "grna_targets.tsv", sep="\t")
     split = pd.read_csv(args.pairs, sep="\t")
@@ -366,7 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     reps = range(args.rep_offset + 1, args.rep_offset + args.reps + 1)
 
     print(
-        f"{len(genes_of)} targets / {len(split)} pairs, replicates {reps.start}-{reps.stop - 1}, "
+        f"{len(genes_of)} targets / {len(split)} pairs, simulations {reps.start}-{reps.stop - 1}, "
         f"effect size {args.effect_size} (relative expression {1 - args.effect_size:g}), "
         f"estimand {args.estimand}\n"
         f"  baseline: {args.expression_model}, permutations {args.permutations}, "
@@ -384,9 +401,9 @@ def main(argv: list[str] | None = None) -> int:
         if target not in guides_of:
             raise SystemExit(f"no gRNA maps to target {target!r} in grna_targets.tsv")
 
-    # WHY THE UNIT IS (target, replicate) AND NOT target. pysceptre's own n_jobs
+    # WHY THE UNIT IS (target, simulations) AND NOT target. pysceptre's own n_jobs
     # parallelises over the genes of one call, and a cis target has a median of 6 of
-    # them, so a task given 8 cores left most of them idle. Replicates are
+    # them, so a task given 8 cores left most of them idle. Simulations are
     # independent draws, so splitting them apart keeps every worker busy on cis and
     # on trans alike. The per-target setup (guide assignment, baseline) is redone
     # per unit; it is seeded, so it comes out identical, and it is under 1 % of a unit.
@@ -411,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         units = [(t, list(g), guides_of[t], r) for t, g in genes_of.items() for r in reps]
         workers = min(max(args.n_jobs, 1), len(units))
-        print(f"  {len(units)} (target, replicate) units on {workers} worker(s)")
+        print(f"  {len(units)} (target, simulation) units on {workers} worker(s)")
         results = _map_units(units, workers, args.prepared, settings)
 
     by_target: dict[str, list] = {}
@@ -427,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
         elapsed = sum(e for _, e in done)
         print(
             f"  {target}: {len(genes)} pairs in {elapsed:.1f}s of worker time "
-            f"({elapsed / args.reps:.2f}s/replicate)"
+            f"({elapsed / args.reps:.2f}s/simulation)"
         )
 
     # Every target in the split can have been skipped; an empty table with the
@@ -439,7 +456,7 @@ def main(argv: list[str] | None = None) -> int:
     combined["estimand"] = args.estimand
     info = args.prepared / "pairs_with_info.tsv"
     if info.exists():
-        # Real-data QC counts, constant across replicates, joined rather than
+        # Real-data QC counts, constant across simulations, joined rather than
         # recomputed per draw -- which is what the R implementation does too.
         known = pd.read_csv(info, sep="\t")
         cols = [c for c in ("n_nonzero_trt", "n_nonzero_cntrl", "pass_qc") if c in known]

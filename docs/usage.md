@@ -138,23 +138,36 @@ targets.
 watteg-run-power-simulation \
     --prepared prepared/ --pairs splits/split_001.tsv \
     --effect-size 0.15 --reps 100 --seed 20250812 \
+    --null-fits-file prepared/null_fits.h5 \
     --out sim/split_001_es0.15.tsv
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `--effect-size` | required | A **fractional decrease**: 0.15 is a 15 % knockdown. |
-| `--reps` | required | Replicates in this chunk. |
-| `--rep-offset` | 0 | Replicates already covered by earlier chunks, so `rep` stays unique. |
+| `--reps` | required | Simulations in this chunk. |
+| `--rep-offset` | 0 | Simulations already covered by earlier chunks, so `rep` stays unique. |
 | `--seed` | required | Results are stochastic and must be reproducible. |
+| `--estimand` | `fixed` | What the power is for: an element whose effect *is* es (`fixed`, the guides' mean pinned), or *is es on average* (`random`). See [Methods](methods.md#the-random-estimand-as-an-option). |
 | `--guide-spread-c` | 0.65 | Guide-to-guide spread: each guide's knockdown is Beta with mean es and sd c·es·(1−es), so zero at es = 0. Replaces `--guide-sd`, which is refused. See [Methods](methods.md). |
-| `--n-jobs` | 8 | Workers for the per-gene tests. |
+| `--permutations` | `per-target` | One permutation set per target, drawn from the seed, shared by its simulations. `per-replicate` draws one per simulation (engine only). |
+| `--nulls` | `sparse` | How the engine computes the permutation nulls; `scan` is pysceptre's default. Identical results. |
+| `--driver` | `fast` | `fast` tests a target's simulations together (byte-identical to `engine` under `per-target` / `sparse`); `engine` calls pysceptre once per (target, simulation). |
+| `--null-fits` | `reuse` | `reuse`: each gene's null model fitted once per simulation and shared across targets (needs `--driver fast`). `refit`: per target, exactly. |
+| `--null-fits-file` | none | `watteg-fit-null-models`' output. Without it, a `reuse` task fits its own genes first; same output. |
+| `--n-jobs` | 8 | Worker processes for the task. |
 | `--expression-model` | `fitted` | Where a gene's unperturbed expected counts come from. |
 
-**`--effect-size 0` is allowed on purpose.** It is the null arm: perturbed cells are simulated from
+**The defaults are the fast configuration**, each part measured before it was adopted
+([Methods](methods.md#running-the-screens-test-on-each-simulation)). The previous configuration is
+`--driver engine --null-fits refit`, plus `--permutations per-replicate --nulls scan` for the exact
+earlier behaviour. **A CRT screen needs `--driver engine --null-fits refit`**: the fast driver runs
+the permutation test only, and says so rather than testing a CRT screen by permutations.
+
+**`--effect-size 0` is allowed on purpose.** It simulates no effect: perturbed cells are drawn from
 the unperturbed mean and the screen's own test is run on them, so the p-values should be uniform.
 It is the only way to measure this pipeline's type-I error from its own output. Run it as its own
-sweep, not as another point on a curve.
+sweep, not as another point on a curve. The two estimands are the same simulation there.
 
 **`--expression-model`.** `fitted` draws from `exp(X·β)`, the expected count sceptre's own null
 model gives that cell, so the simulation and the test that judges it are on one scale.
