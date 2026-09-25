@@ -56,7 +56,7 @@ process POWER_SIMULATION {
             --effect-size ${effect_size} \\
             --reps ${reps} \\
             --rep-offset ${rep_offset} \\
-            --guide-sd ${params.guide_sd} \\
+            --guide-spread-c ${params.guide_spread_c} \\
             --seed ${params.seed} \\
             --expression-model ${params.expression_model} \\
             --out ${out_name}

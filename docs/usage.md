@@ -115,7 +115,7 @@ Rscript src/run_power_simulation.R \
 | `--reps` | required | Simulations in this chunk. |
 | `--rep-offset` | `0` | Simulations already covered by earlier chunks; keeps the reported `rep` unique. |
 | `--seed` | required | Base seed. Required, not optional — see *Reproducibility* below. |
-| `--guide-sd` | `0.13` | Spread of per-gRNA effect sizes around the target effect size. |
+| `--guide-spread-c` | `0.65` | Guide-to-guide spread: each guide's knockdown is Beta with mean es and sd c·es·(1−es), so zero at es = 0. Replaces `--guide-sd`, which is refused. See [Methods](methods.md). |
 | `--n-control-cells` | unset | Sample this many controls instead of using all. **Biases power downward; leave unset.** |
 | `--cell-batches` | unset | Covariate column to stratify control sampling by. Only with `--n-control-cells`. |
 | `--gc-every` | `0` | Call `gc()` every N replicates. `0` disables it. |

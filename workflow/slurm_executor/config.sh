@@ -86,7 +86,7 @@ EFFECT_SIZES=(0.15)
 
 NUM_REPLICATES=100     # Monte-Carlo simulations per pair
 SEED=20250812          # base RNG seed
-GUIDE_SD=0.13          # spread of per-gRNA effect sizes around the target effect size
+GUIDE_SPREAD_C=0.65    # guide knockdown ~ Beta(mean es, sd c*es*(1-es)); docs/methods.md
 
 ## NULL MODELS (step 02b) =========================================================================
 #

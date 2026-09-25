@@ -47,7 +47,7 @@ test_that("create_effect_size_matrix returns genes x cells", {
   grna_pert_status <- sample(0:4, n_cells, replace = TRUE)
   pert_guides <- c("g1", "g2")
 
-  mat <- create_effect_size_matrix(grna_pert_status, pert_guides, gene_effect_sizes, guide_sd = 0.13)
+  mat <- create_effect_size_matrix(grna_pert_status, pert_guides, gene_effect_sizes, guide_spread_c = 0.65)
 
   expect_equal(nrow(mat), length(gene_effect_sizes))
   expect_equal(ncol(mat), n_cells)
@@ -57,7 +57,7 @@ test_that("create_effect_size_matrix leaves guide-free cells unperturbed", {
   set.seed(4)
   # Cells 1 and 2 carry no guide; 3-4 carry targeting guides, 5-6 control guides.
   grna_pert_status <- c(0, 0, 1, 2, 3, 4)
-  mat <- create_effect_size_matrix(grna_pert_status, c("g1", "g2"), c(0.8, 0.9), guide_sd = 0.13)
+  mat <- create_effect_size_matrix(grna_pert_status, c("g1", "g2"), c(0.8, 0.9), guide_spread_c = 0.65)
 
   # Row 1 of the guide table is the no-effect row, so a cell with no guide gets exactly 1 for
   # every gene. Cells are columns.
@@ -70,10 +70,10 @@ test_that("create_effect_size_matrix leaves guide-free cells unperturbed", {
 })
 
 test_that("create_effect_size_matrix never returns a negative effect", {
-  # guide_sd large enough that the normal draws go negative and must be clamped.
+  # The Beta draw is bounded in (0, 1) by construction, even at the largest legal spread.
   set.seed(5)
   mat <- create_effect_size_matrix(sample(0:4, 100, replace = TRUE), c("g1", "g2"),
-                                   c(0.5, 0.5), guide_sd = 2)
+                                   c(0.5, 0.5), guide_spread_c = 1.99)
   expect_true(all(mat >= 0))
 })
 
@@ -234,7 +234,7 @@ test_that("simulate_effect_sizes pins each gene's realised mean to the requested
     set.seed(100)
     realised <- replicate(50, {
       m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
-                                 target, guide_sd = 0.13)
+                                 target, guide_spread_c = 0.65)
       expect_true(all(m[, !is_pert] == 1))
       rowMeans(m[, is_pert, drop = FALSE])
     })
@@ -252,15 +252,15 @@ test_that("centring in the wrong order is refused, and skipping it leaves the me
   # perturbed cells "control", and those carry a targeting effect rather than 1. That used to shift
   # the wrong columns in silence; now it cannot run at all.
   set.seed(7)
-  block_order <- create_effect_size_matrix(fx$status, fx$pert_guides, target, guide_sd = 0.13)
+  block_order <- create_effect_size_matrix(fx$status, fx$pert_guides, target, guide_spread_c = 0.65)
   expect_error(center_effect_size_matrix(block_order, fx$pert_status, target), "exactly 1")
 
   # Without centring the realised mean wobbles from replicate to replicate by about
-  # guide_sd * sqrt(sum n_g^2) / sum n_g -- that is the other estimand, random guide effects.
+  # the guides' sd * sqrt(sum n_g^2) / sum n_g -- that is the other estimand, random guide effects.
   # Centring is what removes it.
   set.seed(8)
   uncentred <- replicate(200, {
-    m <- create_effect_size_matrix(fx$status, fx$pert_guides, target, guide_sd = 0.13)
+    m <- create_effect_size_matrix(fx$status, fx$pert_guides, target, guide_spread_c = 0.65)
     mean(m[, fx$restore, drop = FALSE][1, is_pert])
   })
   expect_gt(sd(uncentred), 0.01)
@@ -288,7 +288,7 @@ test_that("the guide status is each cell's own guide, in cell order", {
   # Cells carrying the same guide get the same effect within a replicate.
   set.seed(13)
   m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
-                             c(g1 = 0.85), guide_sd = 0.13)
+                             c(g1 = 0.85), guide_spread_c = 0.65)
   is_pert <- fx$pert_status == 1
   spread <- tapply(m[1, is_pert], st[is_pert], function(v) diff(range(v)))
   expect_true(all(spread == 0))
@@ -297,17 +297,17 @@ test_that("the guide status is each cell's own guide, in cell order", {
 test_that("pinning the mean keeps the guide-to-guide spread", {
   # Centring adds one constant per gene; it must not flatten the guides into one value. With n_g
   # perturbed cells on guide g and N in total, the expected within-replicate variance across the
-  # perturbed cells is guide_sd^2 * (1 - sum(n_g^2) / N^2).
+  # perturbed cells is sd^2 * (1 - sum(n_g^2) / N^2), with sd = c * es * (1 - es).
   fx <- fixture_target()
   is_pert <- fx$pert_status == 1
   st <- fx$status[fx$restore][is_pert]
   n_g <- tabulate(st, nbins = length(fx$pert_guides))
-  expected <- 0.13^2 * (1 - sum(n_g^2) / sum(n_g)^2)
+  expected <- (0.65 * 0.15 * 0.85)^2 * (1 - sum(n_g^2) / sum(n_g)^2)
 
   set.seed(9)
   within <- replicate(400, {
     v <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
-                               c(g1 = 0.85), guide_sd = 0.13)[1, is_pert]
+                               c(g1 = 0.85), guide_spread_c = 0.65)[1, is_pert]
     mean((v - mean(v))^2)
   })
   expect_equal(mean(within), expected, tolerance = 0.1)
@@ -323,7 +323,7 @@ test_that("no control cell can index a targeting row, even when the last target 
 
   # With no guide-to-guide spread every effect is exact: perturbed cells at the target, all other
   # cells at 1. On the old offset some control cells came out at 0.5.
-  m <- create_effect_size_matrix(fx$status, fx$pert_guides, c(g1 = 0.5), guide_sd = 0)
+  m <- create_effect_size_matrix(fx$status, fx$pert_guides, c(g1 = 0.5), guide_spread_c = 0)
   m <- m[, fx$restore, drop = FALSE]
   expect_true(all(m[1, fx$pert_status == 1] == 0.5))
   expect_true(all(m[1, fx$pert_status == 0] == 1))
@@ -357,7 +357,7 @@ test_that("strong knockdowns are pinned exactly, including where most cells clam
     set.seed(11)
     realised <- replicate(200, {
       m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
-                                 c(g1 = 1 - es, g2 = 1 - es), guide_sd = 0.13)
+                                 c(g1 = 1 - es, g2 = 1 - es), guide_spread_c = 0.65)
       expect_true(all(m >= 0))
       rowMeans(m[, is_pert, drop = FALSE])
     })
@@ -406,15 +406,27 @@ test_that("the pin stays exact on very large targets, where tied values pile up 
   }
 })
 
-test_that("at effect size 0 the perturbed mean is exactly 1 and the guides still differ", {
+test_that("at effect size 0 every effect is exactly 1: a null element's guides do nothing", {
+  # The old absolute N(1 - es, 0.13) kept a 13% spread here, which inflated false calls for highly
+  # expressed genes. Under the Beta spread, c * es * (1 - es), there is nothing to draw.
   fx <- fixture_target()
-  is_pert <- fx$pert_status == 1
   set.seed(22)
   m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
-                             c(g1 = 1, g2 = 1), guide_sd = 0.13)
-  expect_equal(unname(rowMeans(m[, is_pert, drop = FALSE])), c(1, 1), tolerance = 1e-12)
-  expect_true(all(m[, !is_pert] == 1))
-  expect_gt(sd(m[1, is_pert]), 0.05)
+                             c(g1 = 1, g2 = 1), guide_spread_c = 0.65)
+  expect_true(all(m == 1))
+})
+
+test_that("the guide draw has the documented moments, and c = 0 means no spread", {
+  # sd = c * es * (1 - es), mean = 1 - es; values checked against scipy/numpy for c = 0.65.
+  set.seed(25)
+  for (es in c(0.05, 0.15, 0.5)) {
+    x <- draw_guide_effects(1 - es, 4e5, guide_spread_c = 0.65)
+    expect_true(all(x > 0 & x < 1))
+    expect_equal(mean(x), 1 - es, tolerance = 2e-3)
+    expect_equal(sd(x), 0.65 * es * (1 - es), tolerance = 1e-2)
+  }
+  expect_identical(draw_guide_effects(0.85, 5, guide_spread_c = 0), rep(0.85, 5))
+  expect_identical(draw_guide_effects(1, 5, guide_spread_c = 0.65), rep(1, 5))
 })
 
 test_that("each gene draws its own guide effects", {
@@ -423,7 +435,7 @@ test_that("each gene draws its own guide effects", {
   is_pert <- fx$pert_status == 1
   set.seed(23)
   m <- simulate_effect_sizes(fx$status, fx$pert_status, fx$restore, fx$pert_guides,
-                             c(g1 = 0.85, g2 = 0.85, g3 = 0.85), guide_sd = 0.13)
+                             c(g1 = 0.85, g2 = 0.85, g3 = 0.85), guide_spread_c = 0.65)
   expect_false(isTRUE(all.equal(m[1, is_pert], m[2, is_pert])))
   expect_false(isTRUE(all.equal(m[2, is_pert], m[3, is_pert])))
 })

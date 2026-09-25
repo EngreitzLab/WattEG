@@ -82,7 +82,7 @@ pixi_run Rscript src/run_power_simulation.R \
   --effect-size "${ES}" \
   --reps "${NUM_REPLICATES}" \
   --rep-offset 0 \
-  --guide-sd "${GUIDE_SD}" \
+  --guide-spread-c "${GUIDE_SPREAD_C}" \
   --seed "${SEED}" \
   --out "${out}"
 

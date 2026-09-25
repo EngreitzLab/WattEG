@@ -81,13 +81,16 @@ option_list <- list(
                            "reproduces only 86.5%% of the observed count variance against the",
                            "fitted model's 99.5%%. Keep it only to reproduce sweeps run with it.",
                            "See baseline_expression() in lib/simulate.R.")),
-  make_option("--guide-sd", type = "double", default = 0.13, dest = "guide_sd",
-              help = paste("Standard deviation of the per-gRNA effect size around the target",
-                           "effect size, i.e. guide-to-guide variability among the target's own",
-                           "guides [default %default]. The guides differ from each other within",
-                           "a replicate, but their mean is pinned to --effect-size, so this does",
-                           "not add uncertainty about the element's effect. Other guides have",
-                           "no effect on the tested genes. Was hardcoded at 0.13 in the original.")),
+  make_option("--guide-spread-c", type = "double", default = 0.65, dest = "guide_spread_c",
+              help = paste("Guide-to-guide spread among the target's own guides: each guide's",
+                           "knockdown is Beta with mean --effect-size and sd c * es * (1 - es)",
+                           "[default %default, fitted to per-guide data from three CRISPRi",
+                           "screens]. Zero at es = 0; must be in [0, 2). The guides' mean is",
+                           "pinned to --effect-size, so this adds no uncertainty about the",
+                           "element's effect. Other guides have no effect on the tested genes.",
+                           "Replaces --guide-sd (an absolute sd of 0.13), which is refused.")),
+  make_option("--guide-sd", type = "double", default = NULL, dest = "guide_sd",
+              help = "Retired; use --guide-spread-c. Passing it is an error."),
   make_option("--n-control-cells", type = "integer", default = NULL, dest = "n_control_cells",
               help = paste("Sample this many control cells per target instead of using every",
                            "non-perturbed cell. Unset means use all of them, which is the",
@@ -143,6 +146,14 @@ if (opts$effect_size < 0 || opts$effect_size >= 1) {
        opts$effect_size, "); 0 is the null arm.", call. = FALSE)
 }
 if (opts$reps < 1) stop("--reps must be at least 1.", call. = FALSE)
+if (!is.null(opts$guide_sd)) {
+  stop("--guide-sd was replaced by --guide-spread-c on 2026-09-25: the spread is now",
+       " c * es * (1 - es) (default 0.65), not an absolute sd. Passing the old 0.13 as c would",
+       " shrink it fivefold, so it is refused rather than reinterpreted.", call. = FALSE)
+}
+if (!is.finite(opts$guide_spread_c) || opts$guide_spread_c < 0 || opts$guide_spread_c >= 2) {
+  stop("--guide-spread-c must be in [0, 2) (got ", opts$guide_spread_c, ").", call. = FALSE)
+}
 if (!opts$expression_model %in% c("fitted", "size_factor")) {
   stop("--expression-model must be 'fitted' or 'size_factor' (got ", opts$expression_model, ").",
        call. = FALSE)
@@ -388,7 +399,7 @@ for (target in targets) {
     # reorder shifted the wrong columns and left the realised mean free to vary.
     es_mat <- simulate_effect_sizes(grna_pert_status, pert_status, restore_cell_order,
                                     pert_guides = pert_guides, gene_effect_sizes = effect_sizes,
-                                    guide_sd = opts$guide_sd)
+                                    guide_spread_c = opts$guide_spread_c)
 
     counts <- draw_counts(gene_object, es_mat, baseline)
 

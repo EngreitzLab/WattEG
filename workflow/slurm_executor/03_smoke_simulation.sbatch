@@ -63,7 +63,7 @@ for i in $(seq 1 "${SMOKE_SPLITS}"); do
     --effect-size "${EFFECT_SIZE}" \
     --reps "${SMOKE_REPS}" \
     --rep-offset 0 \
-    --guide-sd "${GUIDE_SD}" \
+    --guide-spread-c "${GUIDE_SPREAD_C}" \
     --seed "${SEED}" \
     --out "${out}"
   smoke_outputs+=("${out}")

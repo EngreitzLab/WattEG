@@ -71,6 +71,12 @@ workflow {
     // it (prepare_sim_input.R does not declare these flags, and passing them there crashed the
     // step), it diverges from the all-cells path in ways that were never validated, and sampling
     // controls costs 21-60% of power (docs/methods.md). Refuse rather than silently ignore.
+    // guide_sd was an absolute spread (0.13). Its replacement, guide_spread_c, is a coefficient on
+    // es * (1 - es), so reading an old 0.13 as c would shrink the spread fivefold. Refuse it.
+    if (params.guide_sd != null) {
+        error "guide_sd was replaced by guide_spread_c (default 0.65) on 2026-09-25; the spread is " +
+              "now c * es * (1 - es), not an absolute sd. Remove guide_sd from the params."
+    }
     if (params.n_control_cells || params.cell_batches) {
         error "n_control_cells / cell_batches are not supported by the pipeline. Leave them unset; " +
               "to experiment, call src/run_power_simulation.R by hand (see docs/methods.md)."
