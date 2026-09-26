@@ -29,7 +29,7 @@ Generated once, 2026-09-24, with numpy:
 ```python
 rng = np.random.default_rng(20260924)
 n_cells, n_pert = 3000, 150
-targets = [f"t{i}" for i in range(1, 9)]          # t8 is listed but carried by no cell
+targets = [f"t{i}" for i in range(1, 9)]  # t8 is listed but carried by no cell
 others = [f"o{i:03d}" for i in range(1, 201)]
 pert = np.zeros(n_cells, dtype=int)
 pert[rng.choice(n_cells, n_pert, replace=False)] = 1

@@ -19,7 +19,7 @@ process SUMMARIZE_POWER {
     // and could match one sample's power tables to another sample's sim_input.
     //
     // sim_input is here so the summary can carry the gene's dispersion and normalised mean, sparing
-    // every covariate model a 16 MB RDS read for the other half of SE^2 ~ (1/n)(1/mu + 1/theta).
+    // every covariate model a separate read for the other half of SE^2 ~ (1/n)(1/mu + dispersion).
     tuple val(meta), path(power_files, stageAs: 'power/*'), path(sim_input)
 
     output:
@@ -27,12 +27,12 @@ process SUMMARIZE_POWER {
 
     script:
     """
-    power_list=\$(ls power/*.tsv | paste -sd, -)
+    power_list=\$(ls power/*.tsv)
     echo "summarizing \$(ls power/*.tsv | wc -l) effect size(s)"
 
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
-        Rscript ${projectDir}/src/summarize_power.R \\
-            --power "\${power_list}" \\
+        watteg-summarize-power \\
+            --power \${power_list} \\
             --power-threshold ${params.power_threshold} \\
             --sim-input ${sim_input} \\
             --out power_summary.tsv

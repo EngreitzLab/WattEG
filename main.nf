@@ -6,32 +6,43 @@
 //
 // The DAG, and why it has the shape it has:
 //
-//   samplesheet -> PREPARE_SIM_INPUT ---+-> SPLIT_PAIRS -----------------+
-//                                       |                               |
-//                                       +-> FIT_NULL_MODELS (x reps)    |
-//                                           -> MERGE_NULL_MODELS -------+
-//                                                                       v
-//                                       POWER_SIMULATION (split x effect size)
-//                                            -> collectFile by (sample, effect size)
-//                                            -> COMPUTE_POWER -> SUMMARIZE_POWER
+//   samplesheet -> PREPARE_SIM_INPUT -> SPLIT_PAIRS
+//                        |                   -> POWER_SIMULATION (split x effect size x rep chunk)
+//                        +-> FIT_NULL_MODELS ---^   -> per-pair counts -> COMPUTE_POWER
+//                                                   -> [CONSOLIDATE_REPLICATES]   -> SUMMARIZE_POWER
 //
-// FIT_NULL_MODELS hangs off PREPARE_SIM_INPUT rather than off SPLIT_PAIRS because a gene's null
-// model is independent of both the target and the effect size: it is fitted on a null simulation
-// with no knockdown. One set of fits therefore serves every split and every effect size in a sweep
-// -- 100 replicates, not 100 x however many effect sizes. Making it a sibling of SPLIT_PAIRS rather
-// than a descendant is what expresses that.
+// Power is computed inside each simulation task when the task holds all simulations of its pairs
+// (reps_per_chunk == num_replicates, the default): it writes per-pair counts and COMPUTE_POWER adds
+// them up, which gives the table the per-simulation rows give, byte for byte. The rows, and
+// CONSOLIDATE_REPLICATES that publishes them as Parquet, run only under keep_per_simulation or when
+// simulations are chunked across tasks, where power is computed from the rows as before.
+//
+// FIT_NULL_MODELS runs under --driver fast --null-fits reuse: each gene's null model is fitted once
+// per simulation, on an independent draw with no knockdown, and every simulation task reuses that
+// fit for every target the gene is tested with, instead of refitting it per target. It is R's old
+// FIT_NULL_MODELS approximation, rebuilt in Python and measured before it was adopted
+// (docs/pysceptre-backend.md, section 13, item 3c). --null-fits refit skips it and keeps the exact
+// per-target refit.
 
 nextflow.enable.dsl = 2
 
 include { PREPARE_SIM_INPUT } from './modules/local/prepare_sim_input'
 include { SPLIT_PAIRS       } from './modules/local/split_pairs'
 include { FIT_NULL_MODELS   } from './modules/local/fit_null_models'
-include { MERGE_NULL_MODELS } from './modules/local/merge_null_models'
 include { POWER_SIMULATION  } from './modules/local/power_simulation'
 include { CONSOLIDATE_REPLICATES } from './modules/local/consolidate_replicates'
 include { COMPUTE_POWER     } from './modules/local/compute_power'
 include { SUMMARIZE_POWER   } from './modules/local/summarize_power'
 
+// Resolve a samplesheet path against the repository root rather than the launch directory, so a
+// run's validity does not depend on where it was started from. A scheme-prefixed URI (gs://, s3://,
+// az://) is absolute in the same sense a leading '/' is, and must not be prefixed either.
+//
+// Test the STRING, not file(p).isAbsolute(): Nextflow's file() resolves a relative path against
+// launchDir and hands back an absolute path, so isAbsolute() is always true and the projectDir
+// fallback would never fire -- silently making resolution depend on the launch directory, which is
+// the thing this is here to prevent.
+//
 // A function, not a closure assigned with `def`: Nextflow 26.04's strict syntax does not see the
 // latter from inside a workflow body.
 def resolve(p) {
@@ -46,18 +57,36 @@ workflow {
     // ---- parameter checks -----------------------------------------------------------------
     //
     // Cheap to check here, expensive to discover 40 minutes into a 1,000-task run.
+    // guide_sd was an absolute spread (0.13). Its replacement, guide_spread_c, is a coefficient on
+    // es * (1 - es), so reading an old 0.13 as c would shrink the spread fivefold. Refuse it.
+    if (params.guide_sd != null) {
+        error "guide_sd was replaced by guide_spread_c (default 0.65) on 2026-09-25; the spread is " +
+              "now c * es * (1 - es), not an absolute sd. Remove guide_sd from the params."
+    }
     if (!params.effect_sizes || params.effect_sizes.size() == 0) {
         error "effect_sizes is empty -- nothing to simulate."
+    }
+    if (params.reps_per_chunk != params.num_replicates && !params.keep_per_simulation) {
+        log.warn "reps_per_chunk (${params.reps_per_chunk}) < num_replicates " +
+                 "(${params.num_replicates}): a pair's simulations span several tasks, so power " +
+                 "is computed from the per-simulation rows, which are written and consolidated " +
+                 "as if keep_per_simulation were true."
     }
     if (params.num_replicates % params.reps_per_chunk != 0) {
         error "num_replicates (${params.num_replicates}) must be a multiple of reps_per_chunk " +
               "(${params.reps_per_chunk}); otherwise the last chunk is short and the power " +
               "denominators differ between pairs."
     }
-    if (params.num_replicates % params.reps_per_null_chunk != 0) {
-        error "num_replicates (${params.num_replicates}) must be a multiple of " +
-              "reps_per_null_chunk (${params.reps_per_null_chunk}), or some replicate will have " +
-              "no null model fitted for it."
+    // The fast driver shares one set of permutation matrices across a target's simulations, which
+    // is the engine's test only when they share one permutation set; reused fits are read only by
+    // the fast driver. Both combinations would fail every simulation task.
+    if (params.driver == 'fast' && params.permutations != 'per-target') {
+        error "driver 'fast' needs permutations 'per-target' (got '${params.permutations}'); " +
+              "set driver 'engine' to run per-replicate permutations."
+    }
+    if (params.null_fits == 'reuse' && params.driver != 'fast') {
+        error "null_fits 'reuse' needs driver 'fast'; the engine refits every gene itself. " +
+              "Set null_fits 'refit' with driver 'engine'."
     }
     // The gcb profile has no default container_image -- see conf/gcb.config for why -- so a run
     // that forgets --container_image would otherwise fail 5-30 minutes in, on the first task,
@@ -65,21 +94,6 @@ workflow {
     if (workflow.profile.tokenize(',').contains('gcb') && !params.container_image) {
         error "profile 'gcb' requires --container_image (a Wave/Docker image with the pinned " +
               "pixi environment baked in -- see conf/gcb.config)."
-    }
-
-    // Sampled control cells are not wired through the pipeline: the path was never reachable from
-    // it (prepare_sim_input.R does not declare these flags, and passing them there crashed the
-    // step), it diverges from the all-cells path in ways that were never validated, and sampling
-    // controls costs 21-60% of power (docs/methods.md). Refuse rather than silently ignore.
-    // guide_sd was an absolute spread (0.13). Its replacement, guide_spread_c, is a coefficient on
-    // es * (1 - es), so reading an old 0.13 as c would shrink the spread fivefold. Refuse it.
-    if (params.guide_sd != null) {
-        error "guide_sd was replaced by guide_spread_c (default 0.65) on 2026-09-25; the spread is " +
-              "now c * es * (1 - es), not an absolute sd. Remove guide_sd from the params."
-    }
-    if (params.n_control_cells || params.cell_batches) {
-        error "n_control_cells / cell_batches are not supported by the pipeline. Leave them unset; " +
-              "to experiment, call src/run_power_simulation.R by hand (see docs/methods.md)."
     }
 
     // ---- inputs ---------------------------------------------------------------------------
@@ -95,6 +109,7 @@ workflow {
     // A scheme-prefixed URI (gs://, s3://, az://) is absolute in the same sense a leading '/' is --
     // it already names a full location, not one relative to the repo. Without this check,
     // '${projectDir}/gs://bucket/obj' is nonsense and never exists.
+
     // Emptiness is checked on the file, eagerly, rather than with .ifEmpty on the channel.
     // ifEmpty's closure is invoked while the DAG is being built, not when the channel turns out to
     // be empty, so `.ifEmpty { error ... }` aborts every run and -- worse -- reports the empty-
@@ -112,21 +127,18 @@ workflow {
         .fromPath(sheet, checkIfExists: true)
         .splitCsv(header: true)
         .map { row ->
-            if (!row.sample?.trim() || !row.sceptre_object?.trim()) {
+            if (!row.sample?.trim() || !row.dataset?.trim()) {
                 error "samplesheet ${params.samplesheet} needs non-empty 'sample' and " +
-                      "'sceptre_object' columns; got: ${row}"
+                      "'dataset' columns; got: ${row}"
             }
-            def obj = resolve(row.sceptre_object.trim())
-            if (!obj.exists()) {
-                error "sample '${row.sample}': sceptre object not found at ${obj}"
+            // A .h5mu from pysceptre's export, written with --all-genes --all-cells. The sceptre
+            // object is no longer an input to this pipeline at all: converting it is a one-off
+            // step that happens outside, which is what lets the environment hold no R.
+            def dataset = resolve(row.dataset.trim())
+            if (!dataset.exists()) {
+                error "sample '${row.sample}': dataset not found at ${dataset}"
             }
-            // Optional: only set when the sceptre object's response matrix is odm-backed. Absent
-            // for every existing samplesheet, which is why the column and the check are optional.
-            def odm = row.response_odm?.trim() ? resolve(row.response_odm.trim()) : []
-            if (odm && !odm.exists()) {
-                error "sample '${row.sample}': --response-odm file not found at ${odm}"
-            }
-            [ [id: row.sample.trim()], obj, odm ]
+            [ [id: row.sample.trim()], dataset ]
         }
 
     // ---- step 1: reduce the sceptre object -------------------------------------------------
@@ -153,41 +165,34 @@ workflow {
                  "${params.test_max_splits} of ${params.n_splits} splits. NOT a complete run."
     }
 
-    // ---- step 2b: null models, one task per replicate chunk --------------------------------
-    //
-    // Fanned out over replicate offsets and joined back to the sample's prepared inputs. Divisibility
-    // of num_replicates by reps_per_null_chunk is checked above, so every chunk is full width.
-    // The chunk count is bounded when the range is built rather than with `take` afterwards, both
-    // because it avoids the operator-argument problem above and because it is what it means: there
-    // are only this many chunks, not "there are 100 and we ignore most of them".
-    def reps_to_fit    = params.test_max_null_reps ?: params.num_replicates
-    def n_null_chunks  = reps_to_fit.intdiv(params.reps_per_null_chunk)
-
-    ch_null_offsets = Channel
-        .of(0..<n_null_chunks)
-        .map { i -> [ i * params.reps_per_null_chunk, params.reps_per_null_chunk ] }
-
-    ch_prepared = PREPARE_SIM_INPUT.out.sim_input
-        .join(PREPARE_SIM_INPUT.out.template)
-        .join(PREPARE_SIM_INPUT.out.grna_targets)
-
-    FIT_NULL_MODELS(ch_prepared.combine(ch_null_offsets))
-
-    // ---- step 2c: merge the chunks ---------------------------------------------------------
-    //
-    // groupTuple with an explicit size would deadlock if a chunk failed; the default waits for the
-    // channel to close instead, and merge_null_models.R independently checks the replicate count.
-    ch_chunks = FIT_NULL_MODELS.out.chunk.groupTuple()
-
-    def merged_reps = params.test_max_null_reps ?: params.num_replicates
-    MERGE_NULL_MODELS(ch_chunks, merged_reps)
-
-    // ---- step 4: the simulation ------------------------------------------------------------
+    // ---- step 3: the simulation ------------------------------------------------------------
     //
     // The per-sample inputs are one item; the fan-out is the cross product of splits, effect sizes
-    // and replicate chunks. Joining the null models in first keeps the sample's five inputs
-    // together, so `combine` only ever multiplies out the things that genuinely vary.
-    ch_sim_inputs = ch_prepared.join(MERGE_NULL_MODELS.out.null_models)
+    // and replicate chunks. Joining the sample's inputs first keeps them together, so `combine`
+    // only ever multiplies out the things that genuinely vary.
+    //
+    // pairs_with_info is optional -- an export with no discovery_pairs_with_info produces none --
+    // so it is mixed in with a default rather than joined, which would drop the sample entirely.
+    //
+    // The null-model fits: FIT_NULL_MODELS' file under null_fits 'reuse', an empty placeholder
+    // otherwise. The process is always wired, and fed nothing when it is not wanted, so there is
+    // one channel shape either way.
+    FIT_NULL_MODELS(PREPARE_SIM_INPUT.out.sim_input
+                        .join(PREPARE_SIM_INPUT.out.pairs)
+                        .join(PREPARE_SIM_INPUT.out.analysis_mode)
+                        .filter { params.null_fits == 'reuse' })
+    ch_null_fits = params.null_fits == 'reuse'
+        ? FIT_NULL_MODELS.out.fits
+        : PREPARE_SIM_INPUT.out.sim_input.map { meta, _sim_input -> [meta, []] }
+
+    ch_sim_inputs = PREPARE_SIM_INPUT.out.sim_input
+        .join(PREPARE_SIM_INPUT.out.grna_targets)
+        .join(PREPARE_SIM_INPUT.out.analysis_mode)
+        .join(PREPARE_SIM_INPUT.out.pairs_with_info, remainder: true)
+        .map { meta, sim_input, grna_targets, analysis_mode, info ->
+            [meta, sim_input, grna_targets, analysis_mode, info ?: []] }
+        .join(ch_null_fits)
+        .join(PREPARE_SIM_INPUT.out.threshold)
 
     ch_rep_chunks = Channel
         .of(0..<(params.num_replicates.intdiv(params.reps_per_chunk)))
@@ -196,8 +201,9 @@ workflow {
     // combine on the meta key so a multi-sample run pairs each sample with its own splits rather
     // than with every sample's.
     // No trailing map: `combine` flattens the [offset, reps] pair into two elements rather than
-    // keeping it as one, so this already emits the nine fields POWER_SIMULATION declares --
-    // meta, sim_input, template, grna_targets, null_models, split, effect_size, rep_offset, reps.
+    // keeping it as one, so this already emits the eleven fields POWER_SIMULATION declares --
+    // meta, sim_input, grna_targets, analysis_mode, pairs_with_info, null_fits, threshold, split,
+    // effect_size, rep_offset, reps.
     ch_sim_tasks = ch_sim_inputs
         .combine(ch_splits, by: 0)
         .combine(Channel.fromList(params.effect_sizes))
@@ -205,26 +211,24 @@ workflow {
 
     POWER_SIMULATION(ch_sim_tasks)
 
+    // ---- step 4: the per-simulation rows, when they are written --------------------------------
+    //
+    // groupTuple over (meta, effect size) collects every split's output for one effect size. With
+    // no rows written (the default) the channel is empty and CONSOLIDATE_REPLICATES never runs.
+    // Deliberately not collectFile: the power step takes the file list itself and validates it.
+    CONSOLIDATE_REPLICATES(POWER_SIMULATION.out.sim.groupTuple(by: [0, 1]))
+
     // ---- step 5: power, per (sample, effect size) -------------------------------------------
     //
-    // groupTuple over (meta, effect size) collects every split's output for one effect size.
-    // Deliberately not collectFile: compute_power.R takes the file list itself and validates the
-    // replicate count per pair, which a concatenation would hide.
-    ch_by_es = POWER_SIMULATION.out.sim.groupTuple(by: [0, 1])
-
-    // ---- step 4b: one Parquet per effect size ----------------------------------------------
+    // From the tasks' per-pair counts when each task held all simulations of its pairs; from the
+    // consolidated rows otherwise. `whole` mirrors the test POWER_SIMULATION makes.
     //
-    // The per-split TSVs are no longer published; this is. They cost 30-90 s of parsing per read
-    // as 1,000 gzipped files, and the per-replicate output is the one thing power can be
-    // re-derived from, so it is read repeatedly. The splits remain in the work directory, so a
-    // failed consolidation loses nothing.
-    CONSOLIDATE_REPLICATES(ch_by_es)
-
     // Each sample's own threshold, joined on the meta key -- not `.first()`, which scored every
-    // sample of a multi-sample run against whichever sample's threshold arrived first.
-    COMPUTE_POWER(CONSOLIDATE_REPLICATES.out.parquet
-                      .map { meta, es, f -> [meta, es, [f]] }
-                      .combine(PREPARE_SIM_INPUT.out.threshold, by: 0))
+    // sample of a multi-sample run against sample 1's.
+    ch_power_in = (params.reps_per_chunk as int) == (params.num_replicates as int)
+        ? POWER_SIMULATION.out.partials.groupTuple(by: [0, 1])
+        : CONSOLIDATE_REPLICATES.out.parquet.map { meta, es, f -> [meta, es, [f]] }
+    COMPUTE_POWER(ch_power_in.combine(PREPARE_SIM_INPUT.out.threshold, by: 0))
 
     // ---- step 6: one row per pair across every effect size ---------------------------------
     ch_all_power = COMPUTE_POWER.out.power

@@ -35,56 +35,48 @@ proportion over a finite number of simulations, every estimate is reported with 
 ## Quickstart
 
 ```sh
-# 1. environment (sceptre is installed from a pinned commit, not from a conda channel)
+# 1. environment -- one Python package plus Nextflow, no R
 pixi install
-pixi run setup
-pixi run check-api        # asserts the pinned sceptre exposes the internals this pipeline uses
 
-# 2. derive the simulation inputs from your sceptre object
-Rscript src/prepare_sim_input.R \
-    --sceptre-object results/sample1/sceptre_object.rds \
-    --outdir prepared/
-
-# 3. split the pairs into per-task chunks
-Rscript src/split_pairs.R --pairs prepared/pairs.tsv --n-splits 280 --outdir splits/
-
-# 4. simulate one chunk (repeat per split and per effect size)
-Rscript src/run_power_simulation.R \
-    --sim-input prepared/sim_input.rds \
-    --sceptre-template prepared/sceptre_template.rds \
-    --pairs splits/split_001.tsv \
-    --grna-targets prepared/grna_targets.tsv \
-    --effect-size 0.15 --reps 100 --seed 20250812 \
-    --out sim/split_001_es0.15.tsv
-
-# 5. power per pair, then one table across effect sizes
-Rscript src/compute_power.R --simulations "$(ls sim/*_es0.15.tsv | paste -sd, -)" \
-    --threshold-file prepared/discovery_threshold.txt --out power_es0.15.tsv
-Rscript src/summarize_power.R --power power_es0.15.tsv,power_es0.2.tsv --out power_summary.tsv
+# 2. the whole pipeline
+nextflow run . -profile sherlock -params-file config/config.yml
 ```
 
-Every script is standalone and self-documenting via `--help`. See
-[Usage]({{ site.baseurl }}{% link usage.md %}) for all parameters.
+Or step by step, each with `--help`:
+
+```sh
+watteg-prepare-sim-input --dataset export/dataset.h5mu --outdir prepared/
+watteg-split-pairs --pairs prepared/pairs.tsv --n-splits 280 --outdir splits/
+watteg-run-power-simulation \
+    --prepared prepared/ --pairs splits/split_001.tsv \
+    --effect-size 0.15 --reps 100 --seed 20250812 \
+    --out sim/split_001_es0.15.tsv
+watteg-compute-power --simulations sim/ \
+    --threshold-file prepared/discovery_threshold.txt --out power_es0.15.tsv
+watteg-summarize-power --power power_es0.15.tsv power_es0.2.tsv \
+    --sim-input prepared/sim_input.h5 --out power_summary.tsv
+```
+
+See [Usage]({{ site.baseurl }}{% link usage.md %}) for all parameters, including how to produce the
+`.h5mu` from a sceptre object.
 
 ## Input
 
-**One file: a sceptre object** on which `assign_grnas()` and `run_qc()` have been called, using
-`grna_integration_strategy = "union"`.
+**One file: a `.h5mu`**, exported once from a sceptre object on which `assign_grnas()` and
+`run_qc()` have been called, using `grna_integration_strategy = "union"`. Everything else — the
+discovery pairs, the gRNA-to-target mapping, the significance threshold, the analysis parameters —
+travels with it.
 
-Everything else is derived from it. Earlier versions of this pipeline additionally required
-`gene_grna_group_pairs.rds`, `grna_groups_table.rds` and a discovery-results file; all three
-duplicated data already present in the object:
-
-| Previously a separate input | Read instead from |
-|---|---|
-| `gene_grna_group_pairs.rds` | `@discovery_pairs_with_info` (which also carries `pass_qc`) |
-| `grna_groups_table.rds` | `@grna_target_data_frame` |
-| discovery results | `@discovery_result` |
+Producing that export is the only step that needs R, and it is not part of the pipeline; see
+[Usage]({{ site.baseurl }}{% link usage.md %}). It must be written with `--all-genes --all-cells`,
+for reasons that are not cosmetic: the size factors reduce over the whole gene set, and are
+computed against a geometric mean over every cell including the ones QC removed.
 
 ## Choosing parameters
 
 The one parameter that changes your *results* is `num_replicates`; `n_splits` and
-`reps_per_chunk` only change how the work is divided. Read
+`reps_per_chunk` only change how the work is divided, and that is checked end to end rather than
+assumed — see Reproducibility in [Usage]({{ site.baseurl }}{% link usage.md %}). Read
 [Choosing num_replicates]({{ site.baseurl }}{% link choosing-num-replicates.md %}) before
 picking one — the right value depends on whether you report aggregate power, per-pair power, or
 make per-pair decisions at a cutoff.
@@ -92,10 +84,16 @@ make per-pair decisions at a cutoff.
 Two settings deserve a warning, both documented in
 [Methods]({{ site.baseurl }}{% link methods.md %}):
 
-- **`n_control_cells`** looks like a large speedup but biases power downward substantially
-  (measured: 29% relative loss at 5,000 controls). Leave it unset.
 - **`alpha`** should normally be left unset so the threshold is derived from the real discovery
   results, which reflects the multiple-testing correction actually applied.
+- **`expression_model`** should be left at `fitted`. `size_factor` exists only to reproduce sweeps
+  produced before 2026-09-21; it mixes two statistical models of the same data and reproduces
+  86.5% of the observed count variance against the fitted model's 99.5%.
+
+`n_control_cells` and `cell_batches` are gone. They sampled control cells to buy speed, cost 21-60%
+of power, and were never on; the Python path is fast enough that the trade has no upside. See
+[Plan - pysceptre backend]({{ site.baseurl }}{% link pysceptre-backend.md %}) section 9 for why
+dropping the batch stratification does not expose the arms to drift.
 
 ## Documentation
 

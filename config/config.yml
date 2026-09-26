@@ -42,13 +42,29 @@ num_replicates: 100
 # three CRISPRi screens (docs/methods.md). Replaces guide_sd, which the pipeline now refuses.
 guide_spread_c: 0.65
 
+# What the power is power for (docs/methods.md, "What simulated power means"). 'fixed': an element
+# whose effect IS the effect size, the guides' cell-weighted mean pinned to it in every simulation.
+# 'random': an element whose effect is the effect size on average (the question PerturbPlan asks
+# with fold_change_sd = c * es * (1 - es)). Identical at effect size 0. Written into every output.
+estimand: fixed
+
+# The simulation's configuration: the fast one, the default since 2026-09-25, each part measured
+# before it was adopted (docs/pysceptre-backend.md, section 13; docs/methods.md).
+#   permutations  per-target: one permutation set per target, drawn from the seed (per-replicate:
+#                 a fresh set per simulation, engine only)
+#   nulls         sparse: pysceptre's draw-matrix route, identical results (scan: its default)
+#   driver        fast: a target's simulations tested together, byte-identical to the engine
+#   null_fits     reuse: each gene's null model fitted once per simulation (FIT_NULL_MODELS) and
+#                 shared across targets (refit: per target, exactly; what driver engine needs)
+# The fast driver runs the permutation test only: a CRT screen needs driver engine, null_fits refit.
+permutations: per-target
+nulls: sparse
+driver: fast
+null_fits: reuse
+
 # Parallelisation only; does not affect results. Seeds derive from
 # (seed, target, rep, effect_size), so output is invariant to the split layout.
 n_splits: 1000
-
-# Simulations per null-model task (step 02b). One fit covers every gene on one simulation in ~20
-# minutes, so 1 per task keeps the whole set at ~20 minutes rather than ~33 hours serial.
-reps_per_null_chunk: 1
 
 # Simulations per simulation task. Set equal to num_replicates for no chunking, which is what every
 # run so far has done and what the measured cost model assumes.
@@ -58,6 +74,13 @@ reps_per_null_chunk: 1
 # docs/choosing-num-replicates.md, and it is NOT free: each chunk re-pays the per-target setup, so
 # prefer raising n_splits over lowering this. See docs/status.md, "Decisions already made".
 reps_per_chunk: 100
+
+# Keep one row per (pair, simulation), published as a Parquet per effect size. Off by default:
+# each simulation task holds all simulations of its pairs and writes per-pair counts, and
+# COMPUTE_POWER builds the same power table from them (docs/output.md). Turn it on for a sweep you
+# will want to re-analyse by simulation (subsampling, bootstrapping, a new threshold). Implied when
+# reps_per_chunk < num_replicates.
+keep_per_simulation: false
 
 # Base RNG seed.
 seed: 20250812
@@ -69,7 +92,3 @@ conf_level: 0.95
 
 # Optional, unset by default.
 # alpha: 0.05                 # p-value threshold; otherwise derived from the sceptre object
-#
-# n_control_cells and cell_batches are NOT accepted by the pipeline: setting either stops the run
-# at startup. Sampling controls costs 21-60% of power (docs/methods.md); to experiment with it, call
-# src/run_power_simulation.R by hand.

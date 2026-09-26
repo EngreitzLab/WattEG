@@ -1,0 +1,48 @@
+# The tests that need neither R nor a real screen, which is all of them by default: the two that
+# do are behind `-m realdata` and are skipped here.
+#
+# Not a pixi environment. pixi resolves pysceptre from git and would rebuild the whole conda
+# environment on every push; uv installs the same dependencies from pyproject.toml in seconds. What
+# that gives up is checking that pixi.lock still resolves, which is what the container build does
+# and which does not need to happen on every commit.
+
+name: tests
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: |
+          uv venv --python 3.12
+          # pysceptre is not on PyPI; the pin matches pixi.toml's and has to move with it.
+          uv pip install "pysceptre @ git+https://github.com/broadinstitute/pysceptre.git@v0.2.0"
+          uv pip install -e ".[dev]"
+
+      - name: Lint
+        run: |
+          uv run ruff check src tests workflow
+          uv run ruff format --check src tests workflow
+
+      - name: Test
+        run: uv run pytest -q
+
+      - name: Nextflow DAG
+        # Catches a rewiring mistake without running anything. The stub needs the synthetic
+        # dataset, which is generated rather than committed.
+        run: |
+          curl -fsSL https://get.nextflow.io | bash
+          uv run watteg-make-test-data --out tests/data/synthetic.h5mu
+          ./nextflow run . -profile standard -params-file config/test.yml -stub-run \
+            --samplesheet assets/samplesheet_synthetic.csv --outdir /tmp/stub

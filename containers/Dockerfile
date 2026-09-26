@@ -1,79 +1,52 @@
 # Image for running WattEG on a cloud executor (the `gcb` profile).
 #
-# /opt/pipeline is load-bearing. conf/gcb.config's beforeScript symlinks each task's ${projectDir}
-# here; without it `pixi run` finds a manifest with no environment beside it and every task dies
-# with "pixi: command not found". Change it here and change it there.
+# - The environment is baked in: every task runs `pixi run --frozen ...`, and solving per task would
+#   repeat minutes of work thousands of times.
+# - /opt/pipeline is load-bearing: conf/gcb.config symlinks each task's ${projectDir} to it. Change
+#   it here and change it there.
+# - The pipeline is cloned at WATTEG_REF. ALWAYS pass a commit SHA; `main` makes the image silently
+#   non-reproducible. Rebuild whenever pixi.lock changes, including the pysceptre pin.
+# - pysceptre's scripts/ (sceptre_io.py, which watteg-prepare-sim-input and make_test_data import)
+#   is not shipped in its wheel, so it is fetched at the commit pinned in pixi.lock and put on
+#   PYTHONPATH. Without it every run fails at PREPARE_SIM_INPUT with "No module named sceptre_io".
+# - Keep this file under ~7 KB: Wave rejects a containerfile over 10,000 bytes base64-encoded.
 #
-# The environment is baked in because every task shells out to `pixi run --frozen`, and because it
-# cannot be rebuilt from a conda spec alone: sceptre and ondisc install from pinned commits and
-# compile C++. `pixi run setup` is what does that.
-#
-# BUILD:
-#   wave --containerfile containers/Dockerfile --await
-#   docker build --build-arg WATTEG_REF=<sha> -t <registry>/watteg:<tag> -f containers/Dockerfile .
-#
-# ALWAYS PASS A COMMIT SHA. The default is `main`, which makes the image non-reproducible.
-# REBUILD WHENEVER pixi.lock CHANGES -- nothing enforces it, and a stale image fails at the first
-# task needing the new package with an R error about a missing library.
-#
-# Keep this file under ~7 KB: Wave rejects a containerfile over 10,000 bytes base64-encoded.
-#
-# Two stages, not one: a `RUN rm -rf` in a later layer records the deletion but still ships the
-# bytes. Measured -- single stage 2.14 GiB, two stages 0.68 GiB.
+#   wave --containerfile containers/Dockerfile --build-arg WATTEG_REF=<sha> --await
 
 FROM ubuntu:22.04 AS builder
-
 ENV DEBIAN_FRONTEND=noninteractive
-
-# ca-certificates: stock ubuntu:22.04 ships none, so every HTTPS call fails.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl bzip2 git \
     && rm -rf /var/lib/apt/lists/*
-
-# Pinned: an older pixi cannot read a newer lockfile format.
 ARG PIXI_VERSION=0.76.2
 RUN curl -fsSL https://pixi.sh/install.sh | PIXI_VERSION="v${PIXI_VERSION}" PIXI_NO_PATH_UPDATE=1 bash
 ENV PATH="/root/.pixi/bin:${PATH}"
-
 ARG WATTEG_REF=main
 RUN git clone https://github.com/EngreitzLab/WattEG.git /opt/pipeline \
     && cd /opt/pipeline \
     && git checkout "${WATTEG_REF}" \
     && git rev-parse HEAD > /opt/pipeline/.image-built-from
-
 WORKDIR /opt/pipeline
-
-# Mirrors workflow/slurm_executor/00_setup_env.sbatch: the two must not drift, or a cloud run and a
-# Sherlock run stop being comparable.
-RUN pixi install --frozen \
-    && pixi install --frozen --environment build \
-    && pixi run --frozen setup \
-    && pixi run --frozen check-api
-
-RUN rm -rf /opt/pipeline/.pixi/envs/build /root/.cache/rattler /root/.cache/pixi /root/.pixi/cache
-
-# ---- runtime -------------------------------------------------------------------------------
-# Same base and the SAME PATHS: conda environments embed absolute paths.
+RUN pixi install --frozen
+RUN rev=$(grep -o 'pysceptre.git?tag=[^#]*#[0-9a-f]*' pixi.lock | head -1 | sed 's/.*#//') \
+    && test -n "${rev}" \
+    && git clone https://github.com/broadinstitute/pysceptre.git /opt/pysceptre \
+    && git -C /opt/pysceptre checkout "${rev}"
+RUN rm -rf /root/.cache/rattler /root/.cache/pixi /root/.cache/uv /root/.pixi/cache
 
 FROM ubuntu:22.04
-
 ENV DEBIAN_FRONTEND=noninteractive
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-
-# pixi comes too: process scripts invoke `pixi run` themselves.
 COPY --from=builder /root/.pixi/bin/pixi /root/.pixi/bin/pixi
 COPY --from=builder /opt/pipeline /opt/pipeline
-
+COPY --from=builder /opt/pysceptre/scripts /opt/pysceptre-scripts
 ENV PATH="/root/.pixi/bin:${PATH}"
+ENV PYTHONPATH=/opt/pysceptre-scripts
 WORKDIR /opt/pipeline
-
-# Fail the BUILD rather than the first task of a 5,000-task sweep.
-RUN pixi run --frozen check-api \
+RUN pixi run --frozen python -c "import watteg, pysceptre, sceptre_io; from pysceptre.pipeline.discovery import run_discovery_ntcells_complement; print('watteg', watteg.__version__)" \
+    && pixi run --frozen watteg-prepare-sim-input --help > /dev/null \
     && echo "built from $(cat /opt/pipeline/.image-built-from)"
-
 ENV WATTEG_ROOT=/opt/pipeline
-
 CMD ["/bin/bash"]

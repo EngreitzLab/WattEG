@@ -1,51 +1,49 @@
-// Step 2b -- fit the per-gene null model on a null simulation of each replicate.
+// Step 2b -- each gene's null-model fit, once per simulation, for every simulation task to reuse.
 //
-// WHY THIS EXISTS AT ALL
+// Runs only under --driver fast --null-fits reuse (the defaults). Without it each simulation refits
+// every gene once per target it is tested with, which is the largest cost left in a simulated
+// pair-test (~49 ms of it on cis); the real screen fits each gene once for ~135 targets. With it,
+// each (gene, simulation) is fitted once, on an independent draw with no knockdown keyed
+// rng_for(seed, "__null_fit__|" + gene, simulation, 0), and every target and effect size reuses the
+// fit. R's FIT_NULL_MODELS approximation, measured to leave the moi5 cis call rate unchanged
+// (docs/pysceptre-backend.md, section 13, item 3c; src/watteg/null_fits.py).
 //
-// Before testing a pair, sceptre fits a Poisson GLM of the gene's counts on the cell covariates --
-// the null model the perturbed cells are compared against. It *skips* that fit whenever
-// @response_precomputations already holds an entry for the response_id, and sceptre_template.rds
-// inherited 272 such entries from the real discovery analysis, covering all 237 genes that have
-// QC-passing pairs. So every simulated count was being tested against coefficients fitted to *real*
-// counts, which understates power. Measured: +0.0063 mean power once corrected, concentrated in the
-// transition band. See docs/status.md.
-//
-// WHY IT FANS OUT OVER REPLICATES AND NOTHING ELSE
-//
-// A gene's null model is fitted on a null simulation -- no knockdown -- so it depends on neither the
-// target nor the effect size. One fit per (gene, simulation) therefore serves every target and every
-// effect size in a sweep: 100 simulations, not 100 x targets x effect sizes. Fitting inside each
-// simulation task would pay for it n_splits times over.
-//
-// The seed is derived from (seed, rep) only, deliberately not (seed, target, rep, effect_size), for
-// exactly that reason.
+// One task per sample, covering every gene in pairs.tsv and every simulation 1..num_replicates, so
+// every simulation task, whatever its split or simulation chunk, finds its fits in one file. It
+// parallelises over simulations with task.cpus workers: 244 genes x 100 simulations is ~26 CPU
+// minutes on moi5 cis. The file is ~2.5 MB and records the seed, the baseline and a digest of
+// sim_input.h5; POWER_SIMULATION refuses one that does not match its own run.
 
 process FIT_NULL_MODELS {
-    tag "${meta.id} reps ${rep_offset + 1}-${rep_offset + reps}"
+    tag "${meta.id}"
+
+    publishDir { "${params.outdir}/${meta.id}/prepared" }, mode: params.publish_mode
 
     input:
-    tuple val(meta), path(sim_input), path(sceptre_template), path(grna_targets), val(rep_offset), val(reps)
+    // sim_input.h5 and analysis_mode.tsv keep their names when staged, so --prepared . finds them.
+    tuple val(meta), path(sim_input), path(pairs), path(analysis_mode)
 
     output:
-    tuple val(meta), path("chunk_${String.format('%04d', rep_offset)}.rds"), emit: chunk
+    tuple val(meta), path('null_fits.h5'), emit: fits
 
     script:
-    def chunk = "chunk_${String.format('%04d', rep_offset)}.rds"
     """
+    # One thread per worker, as in POWER_SIMULATION.
+    export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+
     pixi run --frozen --manifest-path ${projectDir}/pixi.toml \\
-        Rscript ${projectDir}/src/fit_null_models.R \\
-            --sim-input ${sim_input} \\
-            --sceptre-template ${sceptre_template} \\
-            --grna-targets ${grna_targets} \\
-            --reps ${reps} \\
-            --rep-offset ${rep_offset} \\
+        watteg-fit-null-models \\
+            --prepared . \\
+            --pairs ${pairs} \\
+            --reps ${params.num_replicates} \\
             --seed ${params.seed} \\
             --expression-model ${params.expression_model} \\
-            --out ${chunk}
+            --n-jobs ${task.cpus} \\
+            --out null_fits.h5
     """
 
     stub:
     """
-    touch chunk_${String.format('%04d', rep_offset)}.rds
+    touch null_fits.h5
     """
 }

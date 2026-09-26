@@ -88,3 +88,7 @@ tests/data/
 
 # Created by tests/config/run.sbatch -- sparse files whose SIZE is the fixture, 3.3 GB of nothing.
 tests/config/inputs/
+.venv/
+__pycache__/
+*.egg-info/
+tests/data/*.h5mu
