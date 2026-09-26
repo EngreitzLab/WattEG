@@ -41,7 +41,12 @@ jobs:
       - name: Nextflow DAG
         # Catches a rewiring mistake without running anything. The stub needs the synthetic
         # dataset, which is generated rather than committed.
+        # pysceptre's scripts/ (sceptre_io, which watteg-make-test-data imports) is not in its
+        # wheel, so it is fetched at the pinned tag and put on PYTHONPATH, as the container does.
         run: |
+          git clone --quiet --depth 1 --branch v0.2.0 \
+            https://github.com/broadinstitute/pysceptre.git /tmp/pysceptre
+          export PYTHONPATH=/tmp/pysceptre/scripts
           curl -fsSL https://get.nextflow.io | bash
           uv run watteg-make-test-data --out tests/data/synthetic.h5mu
           ./nextflow run . -profile standard -params-file config/test.yml -stub-run \
