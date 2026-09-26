@@ -828,20 +828,35 @@ not the port's.
 Decided with the owner on 2026-09-25. Items 1 and 2 are settled; items 3-5 wait on the speed
 measurements in progress, and their numbers are estimates until then.
 
-**Status, 2026-09-25 (end of day).** Done: item 1 in Python (R still to do); item 2 (`e6c6db6`);
+**Status, 2026-09-25 (end of day).** Done: item 1 in Python and in R (`r-implementation` `1a63eb3`); item 2 (`e6c6db6`);
 3a (`3ea5baa`); 3b, the fast driver (`288cb0f`); 3c, fit reuse; item 4's per-pair power inside the
 task, and its memory measurement. **The defaults are now the fast configuration:** `--permutations
 per-target`, `--nulls sparse`, `--driver fast`, `--null-fits reuse` (CLI and Nextflow), with the
 engine, `refit`, `scan` and `per-replicate` still selectable. A CRT screen needs `--driver engine
 --null-fits refit`, because the fast driver runs the permutation test only. Not done: 3d (waits on
-a pysceptre release), item 5 (a cloud measurement), item 6 (not to be run until decided).
+a pysceptre release) and item 6 (not to be run until decided).
+
+**Item 5, measured on the cloud the same evening (`0651653`, seed 20250812, 8 workers per task):**
+
+| | cis (`focused_hoover`) | trans (`maniac_bassi`) |
+|---|---|---|
+| wall clock, launch to summary | ~1 h | 1 h 52 min |
+| simulation tasks | 100, median 11.9 min | 1,000, median 21.8 min, max 29.6 |
+| cost | $2.48 | $67.57 (the previous trans run: $411, 5.6 h) |
+| vs the previous Python run, same seed | +0.0003 mean power, 99.5 % same 0.8 call | +0.0002, 99.56 % same 0.8 call |
+
+- **Under an hour:** trans came in at 1 h 52 min, not under an hour. About 20 min of it is prepare
+  and the fitting step, which run before any simulation starts.
+- **Per-task cost:** the simulation tasks ran at about 1.7x their laptop cost on 8 e2 vCPUs.
+- **Laptop, single core, cis reference target:** 182 ms per pair-test before, 105 with the sparse
+  route, 70 with the fast driver, and 31.5 with fits reused from the file.
 
 **What does not change: the simulation keeps the full design.** Each replicate runs the screen's
 actual test on its actual cells, covariates, guide assignment and threshold, including sceptre's
 permutation test with its escalation. Every speed-up below has to preserve that. None of them
 approximates the design.
 
-### 1. A second estimand: random guide effects -- done in Python; R not yet
+### 1. A second estimand: random guide effects -- done in Python and R
 
 **Done 2026-09-25 in Python** (`watteg.perturbation.effect_size_matrix(estimand=)`, `--estimand`,
 Nextflow `estimand`; written as the last column of every per-simulation row, into the power table
