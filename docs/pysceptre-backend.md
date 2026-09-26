@@ -828,7 +828,8 @@ not the port's.
 Decided with the owner on 2026-09-25. Items 1 and 2 are settled; items 3-5 wait on the speed
 measurements in progress, and their numbers are estimates until then.
 
-**Status, 2026-09-25 (end of day).** Done: item 1 in Python and in R (`r-implementation` `1a63eb3`); item 2 (`e6c6db6`);
+**Status, 2026-09-25 (end of day).** Done: item 1 in Python and in R (`r-implementation`
+`1a63eb3`); item 2 (`e6c6db6`);
 3a (`3ea5baa`); 3b, the fast driver (`288cb0f`); 3c, fit reuse; item 4's per-pair power inside the
 task, and its memory measurement. **The defaults are now the fast configuration:** `--permutations
 per-target`, `--nulls sparse`, `--driver fast`, `--null-fits reuse` (CLI and Nextflow), with the
