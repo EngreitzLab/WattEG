@@ -787,6 +787,21 @@ evenly over 33,066 pairs with the 0.8 crossings symmetric to within two pairs. *
 path computes the same power as the R path.** What Stage B does not cover: trans, where there is
 no R sweep on this code, and other screens.
 
+**Stage 0, the noise floor, measured 2026-09-26 on the fast configuration** (`0651653`, cis, seeds
+20250812 and 20250813):
+
+| comparison | mean diff | mean \|diff\| | within 2 se | same 0.8 call |
+|---|---|---|---|---|
+| Python vs Python, other seed | +0.0001 | 0.0263 | 97.0 % | 98.0 % (329 / 334) |
+| Python (seed 20250812) vs R | −0.0003 | 0.0261 | 97.0 % | 98.0 % (320 / 325) |
+| Python (seed 20250813) vs R | −0.0004 | 0.0265 | 97.0 % | 98.1 % (317 / 317) |
+
+- **Python and R now differ exactly as two Python runs with different seeds do.** What is left
+  between the implementations is Monte Carlo noise.
+- **The mean shift is gone.** It is inside its 2-se bound (0.0005) at both seeds. Before one
+  permutation set per element and reused fits it was −0.00055; those two changes are not
+  separated.
+
 **Two pipeline bugs that only a real run could find**, both fixed; neither changes a number:
 
 - `prepare_sim_input` rebuilt `set(pairs["response_id"])` once per gene: 108 min on moi5 trans
